@@ -94,6 +94,14 @@ scripts/baseline_random_search.py   # 随机探索参照系（复现说明见下
 docs/problem_definition.md          # 问题定义文档（初赛提交物）
 ```
 
+## 初赛提交物（docs/）
+
+- [docs/problem_definition.md](docs/problem_definition.md) — 初赛方案说明（问题定义 + 技术方案 + 已验证案例）
+- [docs/system_description.md](docs/system_description.md) — Agent 系统说明（架构 + 机制 + 增量 + 复现）
+- [docs/route_a_proposal.md](docs/route_a_proposal.md) — 路线 A：构效关系发现 Proposal
+
+## 参照系与复现说明
+
 ## 参照系与复现说明
 
 为排除"发现只是随机运气"，提供**同预算公平对比**参照系：

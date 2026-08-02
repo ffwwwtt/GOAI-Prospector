@@ -78,6 +78,7 @@ class DiscoveryHypothesis:
     expected_relationship: str = ""        # 预期的构效关系 (e.g. "doping X increases Y")
     confidence: float = 0.5               # 置信度 [0, 1]
     novelty_score: float = 0.0            # 新颖性分数 [0, 1]
+    novelty_check: Dict[str, Any] = field(default_factory=dict)  # 系统性新颖性核查结果
 
     # 搜索过程
     search_method: str = ""               # "bayesian" | "mcts" | "llm_guided"
@@ -625,6 +626,16 @@ class MaterialsProjectValidator:
         "diffusion": ["diffusion", "kinetics", "扩散", "扩散系数"],
         "pressure": ["pressure", "压力", "压强"],
         "temperature": ["temperature", "温度"],
+        "thermal conductivity": ["thermal conductivity", "导热系数", "热导率", "导热"],
+        "dielectric": ["dielectric constant", "dielectric permittivity", "介电常数", "介电"],
+        "hardness": ["hardness", "硬度"],
+        "melting point": ["melting point", "熔点"],
+        "elastic modulus": ["elastic modulus", "young's modulus", "弹性模量", "杨氏模量"],
+        "thermoelectric": ["seebeck", "figure of merit", "zt", "功率因子", "热电优值", "塞贝克"],
+        "ionic conductivity": ["ionic conductivity", "离子电导率"],
+        "strength": ["tensile strength", "yield strength", "强度"],
+        "density": ["density", "密度"],
+        "permeability": ["permeability", "渗透率", "渗透性"],
     }
 
     _ORGANIC_MARKERS = (
@@ -1103,6 +1114,429 @@ class MaterialsProjectValidator:
                     pass
 
         return results if results["materials_found"] else None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Novelty Checker — 系统性新颖性核查
+# ═══════════════════════════════════════════════════════════════
+
+class NoveltyChecker:
+    """系统性新颖性核查：判断构效关系假设是否已被文献报道。
+
+    原则（对应评审红线「新知与已知分清」）：
+      - 不采信 LLM 自评的 novelty_score，而是反查已检索文献库：
+        材料×性质组合是否已被研究（supporting_papers）；
+        预期关系方向是否已有明确报道（same_relationship_papers）。
+      - 输出 status: known / partial / new + 边界说明 + 调整后的新颖性分数。
+    完全主题无关：材料与性质关键词全部来自假设本身。
+    """
+
+    _RELATION_MARKERS = (
+        "increase", "enhance", "improve", "boost", "promote", "higher",
+        "larger", "stronger", "decrease", "reduce", "lower", "smaller",
+        "weaker", "correlate", "relationship", "depend", "随", "取决于",
+        "依赖", "提升", "增强", "提高", "促进", "增加", "越高", "越大",
+        "降低", "减少", "越小", "抑制", "vs", "versus",
+    )
+
+    def __init__(self, source_text: str = ""):
+        self.source_text = source_text
+
+    def _load_source(self) -> str:
+        from pathlib import Path as _Path
+        if self.source_text.strip():
+            return self.source_text
+        parts = []
+        for cand in (
+            "workspace/outputs/literature_survey/knowledge_graph.md",
+            "workspace/outputs/literature_survey/paper_summaries.md",
+        ):
+            p = _Path(cand)
+            if p.exists():
+                try:
+                    parts.append(p.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    continue
+        pd = _Path("workspace/data/papers")
+        if pd.exists():
+            for md in sorted(pd.glob("*.md")):
+                try:
+                    parts.append(md.read_text(encoding="utf-8", errors="replace"))
+                except OSError:
+                    continue
+        return "\n".join(parts)
+
+    def check(self, hypothesis: DiscoveryHypothesis) -> Dict[str, Any]:
+        """对单条假设执行新颖性核查。"""
+        source = self._load_source()
+
+        # 材料 tokens
+        mats = []
+        for m in hypothesis.materials[:5]:
+            for part in re.split(r'[/\s,，、]+', m or ""):
+                part = part.strip().lower()
+                if len(part) >= 2:
+                    mats.append(part)
+        if not mats:
+            return {
+                "status": "unknown",
+                "novelty_score": float(hypothesis.novelty_score or 0.5),
+                "supporting_papers": [],
+                "same_relationship_papers": [],
+                "boundary_statement": "材料名为空，无法核查。",
+            }
+
+        # 属性关键词（别名命中目标即启用）
+        target = (hypothesis.property or "").lower()
+        kws = []
+        for aliases in MaterialsProjectValidator._LIT_PROPERTY_KWS.values():
+            if any(al in target for al in aliases):
+                kws.extend(aliases)
+        if not kws:
+            kws = [t for t in re.split(r'[\s/]+', target) if len(t) >= 3][:3]
+        kws = list(dict.fromkeys(kws))
+
+        # 关系方向关键词
+        rel_low = (hypothesis.expected_relationship or "").lower()
+        dir_terms = [t for t in self._RELATION_MARKERS if t in rel_low]
+        has_direction = bool(dir_terms)
+
+        supporting: set = set()
+        same_rel: set = set()
+        matched: List[str] = []
+        blocks = [b for b in re.split(r'\n(?=#{1,3} )', source) if len(b.strip()) > 40] or [source]
+        hyp_materials = [m for m in hypothesis.materials[:5] if m]
+
+        for block in blocks:
+            block_lower = block.lower()
+            if not any(kw in block_lower for kw in kws):
+                continue
+
+            lines = block.splitlines()
+            # 标题行 → 该块的材料上下文
+            heading_mats = []
+            heading_text = ""
+            for line in lines:
+                s = line.strip()
+                if s.startswith("#"):
+                    sl = s.lower()
+                    heading_mats.extend(mt for mt in mats if mt in sl)
+                    heading_text += " " + s
+            if not heading_mats:
+                heading_sig = MaterialsProjectValidator._material_signature(heading_text)
+                for hm in hyp_materials:
+                    if MaterialsProjectValidator._sig_match(
+                        MaterialsProjectValidator._material_signature(hm), heading_sig
+                    ):
+                        heading_mats.append(hm)
+                        break
+
+            for line in lines:
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                bl = s.lower()
+                line_mats = [mt for mt in mats if mt in bl]
+                if not line_mats:
+                    line_sig = MaterialsProjectValidator._material_signature(s)
+                    for hm in hyp_materials:
+                        if MaterialsProjectValidator._sig_match(
+                            MaterialsProjectValidator._material_signature(hm), line_sig
+                        ):
+                            line_mats = [hm]
+                            break
+                if not line_mats and heading_mats:
+                    line_mats = heading_mats
+                if not line_mats:
+                    continue
+                found = [
+                    p.lower()
+                    for p in re.findall(r'\b(p\d+|doi[:/]\S+|arXiv[:/]\S+)\b', bl)
+                ]
+                supporting.update(found)
+                matched.append(s[:160])
+                if has_direction and any(t in bl for t in dir_terms):
+                    same_rel.update(found)
+
+        matched = list(dict.fromkeys(matched))[:40]
+
+        if len(supporting) >= 2 and (not has_direction or len(same_rel) >= 1):
+            status = "known"
+        elif supporting:
+            status = "partial"
+        else:
+            status = "new"
+
+        base = float(getattr(hypothesis, "novelty_score", 0.5) or 0.5)
+        if status == "known":
+            novelty = min(0.3, base * 0.3)
+        elif status == "partial":
+            novelty = min(0.6, base * 0.6)
+        else:
+            novelty = max(0.5, base)
+
+        if status == "known":
+            boundary = (
+                f"该（材料×性质×关系）组合已有明确文献报道（{sorted(same_rel)[:5]}），"
+                "本假设属于对已有结论的复现，新颖性低；建议转向未被覆盖的材料/条件组合。"
+            )
+        elif status == "partial":
+            boundary = (
+                f"材料-性质组合已有研究（{sorted(supporting)[:5]}），"
+                "但预期关系方向未见明确文献报道，属于增量探索。"
+            )
+        else:
+            boundary = (
+                "未在已检索文献库中发现该（材料×性质×关系）组合，"
+                "可作为全新方向；建议再做外部检索（如 arXiv）交叉确认。"
+            )
+
+        return {
+            "status": status,
+            "novelty_score": round(novelty, 3),
+            "supporting_papers": sorted(supporting)[:30],
+            "same_relationship_papers": sorted(same_rel)[:30],
+            "has_direction": has_direction,
+            "matched_lines": matched,
+            "boundary_statement": boundary,
+        }
+
+
+# ═══════════════════════════════════════════════════════════════
+# Model Comparison — 新规律 vs 基线/前人公式 的统计对比
+# ═══════════════════════════════════════════════════════════════
+
+_SAMPLE_UNIT_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*'
+    r'(mmol/g|mol/kg|mmol/cm3|mg/g|m2/g|cm3/g|kJ/mol|eV|meV|%|W/mK|S/cm|g/cm3|'
+    r'K|°C|℃|bar|Å|nm|h|min)',
+    re.IGNORECASE,
+)
+
+# 性质数值常见单位（区别于 K/bar/Å 等描述符单位）
+_PROPERTY_VALUE_UNITS = {
+    "mmol/g", "mol/kg", "mmol/cm3", "mg/g", "m2/g", "cm3/g",
+    "kj/mol", "ev", "mev", "%", "w/mk", "s/cm", "g/cm3",
+}
+
+
+def extract_samples_for_hypothesis(
+    hypothesis: DiscoveryHypothesis, source_text: str,
+) -> Dict[str, Any]:
+    """从知识图谱中抽取（材料, 性质数值, 数值描述符）样本，供模型对比。
+
+    通用实现：材料/性质关键词全部来自假设本身，不绑定任何材料子领域。
+    """
+    mats = []
+    for m in hypothesis.materials[:5]:
+        for part in re.split(r'[/\s,，、]+', m or ""):
+            part = part.strip().lower()
+            if len(part) >= 2:
+                mats.append(part)
+    target = (hypothesis.property or "").lower()
+    kws = []
+    for aliases in MaterialsProjectValidator._LIT_PROPERTY_KWS.values():
+        if any(al in target for al in aliases):
+            kws.extend(aliases)
+    if not kws:
+        kws = [t for t in re.split(r'[\s/]+', target) if len(t) >= 3][:3]
+    kws = list(dict.fromkeys(kws))
+    hyp_materials = [m for m in hypothesis.materials[:5] if m]
+
+    samples: List[Dict[str, Any]] = []
+    seen: set = set()
+    blocks = [b for b in re.split(r'\n(?=#{1,3} )', source_text) if len(b.strip()) > 40] or [source_text]
+
+    for block in blocks:
+        block_lower = block.lower()
+        if not any(kw in block_lower for kw in kws):
+            continue
+        lines = block.splitlines()
+        heading_mats: List[str] = []
+        heading_text = ""
+        for line in lines:
+            s = line.strip()
+            if s.startswith("#"):
+                sl = s.lower()
+                heading_mats.extend(mt for mt in mats if mt in sl)
+                heading_text += " " + s
+        if not heading_mats:
+            heading_sig = MaterialsProjectValidator._material_signature(heading_text)
+            for hm in hyp_materials:
+                if MaterialsProjectValidator._sig_match(
+                    MaterialsProjectValidator._material_signature(hm), heading_sig
+                ):
+                    heading_mats.append(hm)
+                    break
+        for line in lines:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            bl = s.lower()
+            line_mats = [mt for mt in mats if mt in bl]
+            if not line_mats:
+                line_sig = MaterialsProjectValidator._material_signature(s)
+                for hm in hyp_materials:
+                    if MaterialsProjectValidator._sig_match(
+                        MaterialsProjectValidator._material_signature(hm), line_sig
+                    ):
+                        line_mats = [hm]
+                        break
+            if not line_mats and heading_mats:
+                line_mats = heading_mats
+            if not line_mats:
+                continue
+
+            pairs = [
+                (abs(float(vm.group(1))), (vm.group(2) or "").lower())
+                for vm in _SAMPLE_UNIT_RE.finditer(bl)
+                if 0 < abs(float(vm.group(1))) < 1e7
+            ]
+            if not pairs:
+                continue
+            y, y_unit = None, ""
+            desc: Dict[str, float] = {}
+            for v, u in pairs:
+                if y is None and u in _PROPERTY_VALUE_UNITS:
+                    y, y_unit = v, u
+                else:
+                    desc.setdefault(u, v)
+            if y is None:
+                y, y_unit = pairs[0]
+            key = (line_mats[0], round(y, 4))
+            if key in seen:
+                continue
+            seen.add(key)
+            samples.append({
+                "material": line_mats[0],
+                "value": y,
+                "unit": y_unit,
+                "descriptors": desc,
+            })
+
+    return {
+        "samples": samples,
+        "n": len(samples),
+        "descriptor_names": sorted({k for s in samples for k in s["descriptors"]}),
+    }
+
+
+def _r2_score(y_true, y_pred) -> float:
+    ss_res = float(((y_true - y_pred) ** 2).sum())
+    ss_tot = float(((y_true - y_true.mean()) ** 2).sum())
+    if ss_tot == 0:
+        return 0.0
+    return 1.0 - ss_res / ss_tot
+
+
+def _rmse(y_true, y_pred) -> float:
+    return float(((y_true - y_pred) ** 2).mean() ** 0.5)
+
+
+def compare_models(samples: List[Dict], descriptor_names: List[str]) -> Dict[str, Any]:
+    """拟合基线（均值/最优单描述符线性）与候选（二次/多特征线性），输出 R²/RMSE 对比。"""
+    import numpy as _np
+    n = len(samples)
+    if n < 5:
+        return {
+            "status": "insufficient", "n": n,
+            "message": "定量样本不足（<5），请先通过深度阅读/检索扩充知识图谱。",
+        }
+
+    ys = _np.array([s["value"] for s in samples], dtype=float)
+    baseline = {
+        "type": "mean", "r2": 0.0, "rmse": round(float(_np.std(ys)), 4),
+        "descriptor": None,
+    }
+    candidate = None
+
+    usable = []
+    for dname in descriptor_names:
+        vals = _np.array([s["descriptors"].get(dname, _np.nan) for s in samples], dtype=float)
+        mask = ~_np.isnan(vals)
+        if mask.sum() >= 5:
+            usable.append((dname, vals, mask))
+
+    if usable:
+        # 基线：最优单描述符线性
+        best = None
+        for dname, vals, mask in usable:
+            slope, intercept = _np.polyfit(vals[mask], ys[mask], 1)
+            pred = slope * vals[mask] + intercept
+            r2 = _r2_score(ys[mask], pred)
+            if best is None or r2 > best[0]:
+                best = (r2, dname, vals, mask, float(slope), float(intercept))
+        r2_b, dname, vals, mask, slope, intercept = best
+        baseline = {
+            "type": f"linear({dname})",
+            "r2": round(float(r2_b), 4),
+            "rmse": round(_rmse(ys[mask], slope * vals[mask] + intercept), 4),
+            "descriptor": dname,
+            "coefficients": {"slope": round(slope, 4), "intercept": round(intercept, 4)},
+        }
+
+        # 候选 A：二次
+        import warnings as _warnings
+        with _warnings.catch_warnings():
+            _warnings.simplefilter("ignore")
+            coeffs = _np.polyfit(vals[mask], ys[mask], 2)
+        pred2 = _np.polyval(coeffs, vals[mask])
+        cand_quad = {
+            "type": f"quadratic({dname})",
+            "r2": round(float(_r2_score(ys[mask], pred2)), 4),
+            "rmse": round(_rmse(ys[mask], pred2), 4),
+            "descriptor": dname,
+            "coefficients": {
+                "a": round(float(coeffs[0]), 4),
+                "b": round(float(coeffs[1]), 4),
+                "c": round(float(coeffs[2]), 4),
+            },
+        }
+        # 候选 B：多特征线性（若 ≥2 个描述符）
+        cand_multi = None
+        if len(usable) >= 2:
+            d2 = usable[1]
+            both = mask & d2[2]
+            if both.sum() >= 5:
+                X = _np.column_stack([vals[both], d2[1][both]])
+                A = _np.column_stack([X, _np.ones(both.sum())])
+                coef, *_ = _np.linalg.lstsq(A, ys[both], rcond=None)
+                predm = A @ coef
+                cand_multi = {
+                    "type": f"linear({dname}+{d2[0]})",
+                    "r2": round(float(_r2_score(ys[both], predm)), 4),
+                    "rmse": round(_rmse(ys[both], predm), 4),
+                    "descriptor": f"{dname}+{d2[0]}",
+                    "coefficients": {
+                        "w1": round(float(coef[0]), 4),
+                        "w2": round(float(coef[1]), 4),
+                        "b": round(float(coef[2]), 4),
+                    },
+                }
+        candidate = cand_quad
+        if cand_multi and cand_multi["r2"] > cand_quad["r2"]:
+            candidate = cand_multi
+
+    improvement = None
+    if candidate:
+        improvement = candidate["r2"] - baseline["r2"]
+
+    return {
+        "status": "ok",
+        "n": n,
+        "baseline": baseline,
+        "candidate": candidate,
+        "improvement_r2": round(float(improvement), 4) if improvement is not None else None,
+        "message": (
+            "候选模型显著优于基线（R² 提升 >0.02），支持非线性/多描述符关系"
+            if improvement is not None and improvement > 0.02
+            else (
+                "候选与基线相当或更差：关系可能近似线性，或数据量/描述符不足"
+                if improvement is not None
+                else "无可用数值描述符，仅能报告均值基线"
+            )
+        ),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════

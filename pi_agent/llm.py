@@ -389,6 +389,27 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "check_novelty",
+            "description": "系统性新颖性核查（不采信 LLM 自评）：反查已检索文献库（知识图谱+论文摘要+全文缓存），判断每条假设的（材料×性质×预期关系）是否已被文献报道。输出 known（已报道，复现）/ partial（材料×性质已研究但关系方向未见报道）/ new（全新组合），并给出边界说明与修正后的 novelty_score。hypothesis_index 传 'all' 或缺省 = 全部假设；arxiv_check=true 时对 new 假设做 arXiv 外检。生成假设后、正式搜索前应调用。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hypothesis_index": {
+                        "type": "string",
+                        "description": "假设编号（0 开始）或 'all'（默认）"
+                    },
+                    "arxiv_check": {
+                        "type": "boolean",
+                        "description": "是否对 new 状态的假设做 arXiv 外检（慢，默认 false）"
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_discovery_search",
             "description": "Execute Bayesian optimization or MCTS over material-parameter space to discover novel structure-property relationships. Scoring is grounded in the Agent's own knowledge graph (knowledge_graph.md) or paper summaries. Use this after generate_hypotheses.",
             "parameters": {
@@ -422,6 +443,27 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_model_comparison",
+            "description": "新规律 vs 基线/前人公式的统计对比：从知识图谱抽取（材料 × 性质数值 × 数值描述符）样本，拟合基线（均值/最优单描述符线性）与候选模型（二次/多特征线性），输出 R²/RMSE 对比表 + LLM 科学解释（含前人公式为何失效）。可选参数 baseline_model 描述要对比的前人公式（如 'Slack model'）。数据点 <5 时返回提示，需先扩充知识图谱。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hypothesis_index": {
+                        "type": "integer",
+                        "description": "要对比的假设编号（0 开始）"
+                    },
+                    "baseline_model": {
+                        "type": "string",
+                        "description": "可选：要对比的前人经验公式名称/描述（如 Slack model）"
+                    }
+                },
+                "required": ["hypothesis_index"]
             }
         }
     },

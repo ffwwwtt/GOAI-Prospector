@@ -130,6 +130,19 @@ SURVEY_SYSTEM_PROMPT = r"""你是一个自主材料科学研究智能体。你�
   generate_hypotheses(search_method="bayesian")
 ```
 
+**`check_novelty`** — 系统性新颖性核查（生成假设后必做）
+```
+参数：
+  hypothesis_index  假设编号（0 开始）；传 "all" 或缺省 = 全部假设（推荐）
+  arxiv_check       可选：对 new 状态的假设做 arXiv 外检（较慢）
+行为：反查已检索文献库（知识图谱+摘要+全文缓存），判定每条假设
+      known（已有文献报道，复现）/ partial（材料×性质已研究但关系方向未见报道）/ new（全新组合），
+      输出边界说明并修正 novelty_score。**不采信 LLM 自评的新颖性**——
+      "LLM 自己说是新的"不作数，必须有文献核查依据。
+示例：
+  check_novelty(hypothesis_index="all")
+```
+
 **`run_discovery_search`** — 执行搜索发现
 ```
 参数：
@@ -155,6 +168,19 @@ SURVEY_SYSTEM_PROMPT = r"""你是一个自主材料科学研究智能体。你�
    工具记录才是评审可追溯的验证证据；脚本只能做工具之外的补充元分析。
 示例：
   validate_discovery(hypothesis_index="all")
+```
+
+**`run_model_comparison`** — 新规律 vs 前人公式的统计对比
+```
+参数：
+  hypothesis_index  (必填) 假设编号（0 开始）
+  baseline_model    可选：要对比的前人经验公式描述（如 "Slack model"）
+行为：从知识图谱抽取（材料 × 性质数值 × 数值描述符）样本，拟合
+      基线（均值/最优单描述符线性）与候选模型（二次/多特征线性），
+      输出 R²/RMSE 对比 + LLM 科学解释（含前人公式为何失效）。
+      对应路线 A 验证标准：新规律须在统计指标上优于前人成果。
+示例：
+  run_model_comparison(hypothesis_index=4, baseline_model="Slack model")
 ```
 
 **`generate_discovery_report`** — 生成路线 A 发现报告
@@ -190,8 +216,8 @@ SURVEY_SYSTEM_PROMPT = r"""你是一个自主材料科学研究智能体。你�
 3. **图谱审计**：调用 `audit_knowledge_graph` 检测数值冲突 / 重复写法 / 溯源缺失 → read_file 审计报告 → 修正知识图谱 → 将数值冲突写入 gap_report.md 作为矛盾型 Gap
 4. **分析空白**：调用 `analyze_gaps`，LLM 从摘要 + 审计报告中识别 Research Gap
 5. **生成报告**（阶段一完成）：调用 `generate_report`
-6. **形成假设**（阶段二）：基于 Gap 报告调用 `generate_hypotheses`
-7. **搜索验证**：调用 `run_discovery_search` 搜索每条假设后，**统一调用 `validate_discovery(hypothesis_index="all")` 完成全部假设的验证**（不要用 run_shell 脚本自行写验证逻辑；脚本仅可用于工具之外的补充元分析）
+6. **形成假设**（阶段二）：基于 Gap 报告调用 `generate_hypotheses` → **调用 `check_novelty(hypothesis_index="all")` 做系统性新颖性核查**（区分新知与已知）
+7. **搜索验证**：调用 `run_discovery_search` 搜索每条假设后，**统一调用 `validate_discovery(hypothesis_index="all")` 完成全部假设的验证**（不要用 run_shell 脚本自行写验证逻辑；脚本仅可用于工具之外的补充元分析）；**对关键假设调用 `run_model_comparison` 做新规律 vs 前人公式的统计对比**
 
 **关键原则：Agent 自己就是最好的分析器**
 - 所有论文摘要都在 paper_summaries.md 中，Agent 直接阅读分析即可

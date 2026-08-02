@@ -218,6 +218,14 @@ _PROPERTY_KEYWORDS: Dict[str, List[str]] = {
     "diffusion": ["diffusion", "kinetics", "扩散系数", "扩散"],
     "temperature": ["temperature", "温度"],
     "pressure": ["pressure", "压力"],
+    "thermal_conductivity": ["thermal conductivity", "导热系数", "热导率"],
+    "dielectric": ["dielectric constant", "介电常数", "介电"],
+    "hardness": ["hardness", "硬度"],
+    "melting_point": ["melting point", "熔点"],
+    "elastic_modulus": ["elastic modulus", "弹性模量", "杨氏模量"],
+    "thermoelectric": ["seebeck", "figure of merit", "zt", "功率因子", "热电优值"],
+    "ionic_conductivity": ["ionic conductivity", "离子电导率"],
+    "strength": ["tensile strength", "强度"],
 }
 
 

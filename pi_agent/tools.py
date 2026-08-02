@@ -589,6 +589,132 @@ class ToolHandlers:
             f"Next: run_discovery_search(hypothesis_index=N) to explore each hypothesis."
         )
 
+    def _arxiv_related_by_terms(self, hyp) -> list:
+        """arXiv 外检：按（材料×性质）检索，返回高度相关条目标题（最多 3 条）。"""
+        from urllib.parse import quote
+        import xml.etree.ElementTree as _ET
+        import requests as _requests
+
+        terms = [m.strip() for m in hyp.materials[:3] if m.strip() and len(m.strip()) >= 3]
+        prop = (hyp.property or "").strip()
+        if prop:
+            terms.append(prop.split("（")[0].split("(")[0].strip()[:60])
+        if not terms:
+            return []
+        q = quote(f'all:"{" ".join(terms[:3])}"')
+        try:
+            resp = _requests.get(
+                f"http://export.arxiv.org/api/query?search_query={q}&max_results=5",
+                headers={"User-Agent": "goai-pi-agent/1.0"},
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                return []
+            ns = {"a": "http://www.w3.org/2005/Atom"}
+            root = _ET.fromstring(resp.text)
+            out = []
+            prop_tokens = self._coverage_tokens(prop)
+            for entry in root.findall("a:entry", ns):
+                et = entry.find("a:title", ns)
+                if et is None:
+                    continue
+                t = (et.text or "").strip()
+                tl = t.lower()
+                if any(m.lower() in tl for m in hyp.materials[:2]) and (
+                    not prop_tokens or any(kw in tl for kw in prop_tokens)
+                ):
+                    out.append(t[:120])
+                if len(out) >= 3:
+                    break
+            return out
+        except Exception:
+            return []
+
+    def h_check_novelty(self, args: dict) -> str:
+        """系统性新颖性核查：反查已检索文献库，判断假设是否已被报道。"""
+        from literature_agent.discovery import NoveltyChecker
+        from pathlib import Path as _Path
+        import json as _json
+
+        idx = args.get("hypothesis_index", "all")
+        arxiv_check = bool(args.get("arxiv_check", False))
+
+        hypotheses_data = self.survey_state.get("hypotheses", [])
+        if not hypotheses_data:
+            hypo_file = _Path("workspace/outputs/literature_survey/discovery/hypotheses.json")
+            if hypo_file.exists():
+                hypotheses_data = _json.loads(hypo_file.read_text(encoding="utf-8"))
+            else:
+                return "❌ No hypotheses found. Run generate_hypotheses first."
+
+        if str(idx).lower() in ("all", ""):
+            targets = list(range(len(hypotheses_data)))
+        elif str(idx).isdigit():
+            targets = [int(idx)]
+        else:
+            return f"❌ Invalid hypothesis_index: {idx}"
+
+        checker = NoveltyChecker(source_text=self._load_evidence_source() or "")
+        out_dir = _Path("workspace/outputs/literature_survey/discovery")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        lines = ["✅ 新颖性核查完成：", ""]
+        report_rows = []
+        for i in targets:
+            if not (0 <= i < len(hypotheses_data)):
+                return f"❌ Invalid hypothesis_index: {i}"
+            hyp = self._safe_hypothesis(hypotheses_data[i])
+            res = checker.check(hyp)
+            # 可选 arXiv 外检（仅 new 状态）
+            if arxiv_check and res["status"] == "new":
+                related = self._arxiv_related_by_terms(hyp)
+                if related:
+                    res["status"] = "partial"
+                    res["novelty_score"] = round(res["novelty_score"] * 0.7, 3)
+                    res["arxiv_related"] = related
+                    res["boundary_statement"] += "（arXiv 外检发现相关条目，建议核实）"
+            hyp.novelty_score = res["novelty_score"]
+            hyp.novelty_check = res
+            hypotheses_data[i] = asdict(hyp)
+            icon = {"known": "🔁", "partial": "🟡", "new": "🆕", "unknown": "❓"}.get(
+                res["status"], "❓"
+            )
+            lines.append(
+                f"   {icon} hyp[{i}] → {res['status']}"
+                f"（novelty {res['novelty_score']:.2f}）{hyp.title[:45]}"
+            )
+            report_rows.append({
+                "hypothesis_index": i, "title": hyp.title, **res,
+            })
+
+        (out_dir / "hypotheses.json").write_text(
+            _json.dumps(hypotheses_data, ensure_ascii=False, indent=2)
+        )
+        self.survey_state["hypotheses"] = hypotheses_data
+
+        md_lines = [
+            "# 新颖性核查报告",
+            "",
+            "原则：反查已检索文献库，不采信 LLM 自评。",
+            "",
+            "| hyp | 状态 | novelty | 边界说明 |",
+            "|---|---|---|---|",
+        ]
+        for r in report_rows:
+            md_lines.append(
+                f"| {r['hypothesis_index']} | {r['status']} | "
+                f"{r['novelty_score']:.2f} | {r['boundary_statement']} |"
+            )
+        md_path = out_dir / "novelty_report.md"
+        md_path.write_text("\n".join(md_lines), encoding="utf-8")
+
+        lines.append(f"\n   报告：{md_path}")
+        lines.append(
+            "   说明：known=已有文献报道（复现）；partial=材料×性质已研究但关系方向未见报道；"
+            "new=全新组合"
+        )
+        return "\n".join(lines)
+
     # ── 文献证据索引：基于 Agent 自写的知识图谱（Markdown）打分 ──
 
     _PROPERTY_KEYWORD_MAP = {
@@ -603,6 +729,14 @@ class ToolHandlers:
         "效率": ["efficiency"],
         "能耗": ["energy penalty", "regeneration energy"],
         "循环": ["cyclability", "cycle"],
+        "导热": ["thermal conductivity"],
+        "介电": ["dielectric constant", "permittivity"],
+        "硬度": ["hardness"],
+        "熔点": ["melting point"],
+        "模量": ["elastic modulus", "young's modulus"],
+        "热电": ["seebeck", "zt", "power factor"],
+        "电导": ["conductivity", "ionic conductivity"],
+        "强度": ["tensile strength", "yield strength"],
     }
     _VALUE_UNIT_RE = re.compile(
         r'(\d+(?:\.\d+)?)\s*(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|wt%|m2/g|bar|K|%|h|min|eV)',
@@ -1283,6 +1417,126 @@ class ToolHandlers:
         except Exception:
             return True, 0.0
 
+    def _llm_model_explanation(self, hyp, data, result, baseline_note: str) -> str:
+        """LLM 对拟合结果给出科学解释（新规律 + 前人公式为何失效）。"""
+        import json as _json
+        try:
+            prompt = (
+                "你是材料科学研究者。以下是某个构效关系假设的统计拟合结果，"
+                "请用 3-5 句中文给出科学解释：新关系揭示了什么物理/化学规律，"
+                "以及为什么前人类似公式（如果有）会失效。不要编造数值。\n\n"
+                f"假设：{hyp.title}\n"
+                f"材料：{hyp.materials[:4]}\n性质：{hyp.property}\n"
+                f"预期关系：{hyp.expected_relationship}\n\n"
+                f"样本数：{result.get('n')}\n"
+                f"基线模型：{_json.dumps(result.get('baseline'), ensure_ascii=False)}\n"
+                f"候选模型：{_json.dumps(result.get('candidate'), ensure_ascii=False)}\n"
+                f"R² 提升：{result.get('improvement_r2')}\n"
+                f"对比的前人公式（可选）：{baseline_note or '无'}\n\n"
+                "输出格式：一段科学解释。"
+            )
+            return self._llm_text(prompt, max_tokens=700)
+        except Exception:
+            return ""
+
+    def h_run_model_comparison(self, args: dict) -> str:
+        """新规律 vs 基线/前人公式的统计对比（R²/RMSE）。"""
+        from literature_agent.discovery import (
+            extract_samples_for_hypothesis, compare_models,
+        )
+        from pathlib import Path as _Path
+        import json as _json
+
+        idx = args.get("hypothesis_index", 0)
+        baseline_note = (args.get("baseline_model") or "").strip()
+
+        hypotheses_data = self.survey_state.get("hypotheses", [])
+        if not hypotheses_data:
+            hypo_file = _Path("workspace/outputs/literature_survey/discovery/hypotheses.json")
+            if hypo_file.exists():
+                hypotheses_data = _json.loads(hypo_file.read_text(encoding="utf-8"))
+            else:
+                return "❌ No hypotheses found. Run generate_hypotheses first."
+        if not (str(idx).isdigit() and 0 <= int(idx) < len(hypotheses_data)):
+            return f"❌ Invalid hypothesis_index: {idx}"
+
+        hyp = self._safe_hypothesis(hypotheses_data[int(idx)])
+        source = self._load_evidence_source() or ""
+        data = extract_samples_for_hypothesis(hyp, source)
+        result = compare_models(data["samples"], data["descriptor_names"])
+
+        if result.get("status") == "insufficient":
+            return (
+                f"❌ 模型对比数据不足：仅 {result.get('n')} 个定量样本。\n"
+                "   建议：用 get_full_text 深度阅读关键论文，在知识图谱中补充"
+                "（材料 × 数值性质 × 数值描述符）行后再试。"
+            )
+
+        explanation = ""
+        if result.get("candidate"):
+            explanation = self._llm_model_explanation(hyp, data, result, baseline_note)
+
+        out_dir = _Path("workspace/outputs/literature_survey/discovery")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        report = {
+            "hypothesis_index": int(idx),
+            "hypothesis_title": hyp.title,
+            "materials": hyp.materials[:5],
+            "property": hyp.property,
+            "baseline_model": baseline_note,
+            "samples_n": result.get("n"),
+            "baseline": result.get("baseline"),
+            "candidate": result.get("candidate"),
+            "improvement_r2": result.get("improvement_r2"),
+            "message": result.get("message"),
+            "explanation": explanation,
+            "sample_rows": data["samples"][:30],
+        }
+        json_path = out_dir / "model_comparison.json"
+        json_path.write_text(_json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        b = result["baseline"]
+        c = result.get("candidate")
+        md_lines = [
+            f"# 模型对比：{hyp.title}",
+            "",
+            f"**样本数**：{result.get('n')} | **基线模型**：{b['type']} "
+            f"(R²={b['r2']}, RMSE={b['rmse']})",
+        ]
+        if c:
+            md_lines.append(
+                f"**候选模型**：{c['type']} (R²={c['r2']}, RMSE={c['rmse']}) | "
+                f"**R² 提升**：{result.get('improvement_r2'):+.4f}"
+            )
+            md_lines.append(f"\n**结论**：{result.get('message')}")
+            if explanation:
+                md_lines.append(f"\n## 科学解释\n\n{explanation}")
+        else:
+            md_lines.append(f"\n**结论**：{result.get('message')}")
+        if baseline_note:
+            md_lines.append(f"\n**对比的前人公式**：{baseline_note}")
+        md_path = out_dir / "model_comparison.md"
+        md_path.write_text("\n".join(md_lines), encoding="utf-8")
+        self.survey_state["model_comparison"] = report
+
+        lines = [
+            f"✅ 模型对比完成（hyp[{idx}]：{hyp.title[:45]}）",
+            f"   样本数：{result.get('n')}",
+            f"   基线：{b['type']} | R²={b['r2']} | RMSE={b['rmse']}",
+        ]
+        if c:
+            lines.append(
+                f"   候选：{c['type']} | R²={c['r2']} | RMSE={c['rmse']} | "
+                f"R² 提升 {result.get('improvement_r2'):+.4f}"
+            )
+        lines.append(f"   📋 {result.get('message')}")
+        if baseline_note:
+            lines.append(f"   对比公式：{baseline_note}")
+        lines.append(f"   报告：{md_path}")
+        if explanation:
+            lines.append(f"   💡 {explanation[:200]}...")
+        return "\n".join(lines)
+
     def h_generate_discovery_report(self, args: dict) -> str:
         """生成路线 A 发现报告。"""
         from literature_agent.discovery import DiscoveryReport, DiscoveryHypothesis
@@ -1898,8 +2152,10 @@ def build_tool_manager(task_type: str, bench: str, memory_dir: Path,
     manager.register("generate_report", handlers.h_generate_report)
     # Route A: Discovery tools
     manager.register("generate_hypotheses", handlers.h_generate_hypotheses)
+    manager.register("check_novelty", handlers.h_check_novelty)
     manager.register("run_discovery_search", handlers.h_run_discovery_search)
     manager.register("validate_discovery", handlers.h_validate_discovery)
+    manager.register("run_model_comparison", handlers.h_run_model_comparison)
     manager.register("generate_discovery_report", handlers.h_generate_discovery_report)
 
     return manager, handlers
