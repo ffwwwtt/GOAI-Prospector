@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Data & caches
+workspace/data/
+workspace/logs/
+workspace/outputs/
+workspace/memory/
+workspace/feedback/
+workspace/code/
+
+# IDE / misc
+.claude/
+.api_key
+*.bak
+
+# Vendor binaries
+vendor/

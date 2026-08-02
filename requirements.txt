@@ -1,0 +1,17 @@
+# ── LLM API ──
+openai>=1.0
+
+# ── Literature Survey ──
+requests>=2.28
+charset-normalizer>=3.0
+magika>=0.5
+beautifulsoup4>=4.12
+markdownify>=0.14
+mammoth>=1.6
+pdfplumber>=0.10
+pdfminer.six>=20231228
+
+# ── Data & ML (lightweight) ──
+numpy>=1.24
+pandas>=2.0
+scikit-learn>=1.3
