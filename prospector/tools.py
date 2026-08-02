@@ -1482,6 +1482,7 @@ class ToolHandlers:
 
         idx = args.get("hypothesis_index", 0)
         baseline_note = (args.get("baseline_model") or "").strip()
+        classical_model = (args.get("classical_model") or "").strip().lower()
 
         hypotheses_data = self.survey_state.get("hypotheses", [])
         if not hypotheses_data:
@@ -1505,6 +1506,12 @@ class ToolHandlers:
                 "（材料 × 数值性质 × 数值描述符）行后再试。"
             )
 
+        # 经典模型对比（如 Slack 带隙-温度模型）
+        classical = None
+        if classical_model == "slack":
+            from literature_agent.discovery import fit_slack_model
+            classical = fit_slack_model(data["samples"])
+
         explanation = ""
         if result.get("candidate"):
             explanation = self._llm_model_explanation(hyp, data, result, baseline_note)
@@ -1522,6 +1529,7 @@ class ToolHandlers:
             "candidate": result.get("candidate"),
             "improvement_r2": result.get("improvement_r2"),
             "message": result.get("message"),
+            "classical_model": classical,
             "explanation": explanation,
             "sample_rows": data["samples"][:30],
         }
@@ -1546,6 +1554,19 @@ class ToolHandlers:
                 md_lines.append(f"\n## 科学解释\n\n{explanation}")
         else:
             md_lines.append(f"\n**结论**：{result.get('message')}")
+        if classical:
+            md_lines.append("\n## 经典模型对比（Slack）\n")
+            if classical.get("status") == "ok":
+                md_lines.append(
+                    f"- 模型：{classical['model']}\n"
+                    f"- 样本：{classical['n']} | R²={classical['r2']} | RMSE={classical['rmse']}\n"
+                    f"- 参数：{classical['params']}"
+                )
+            else:
+                md_lines.append(
+                    f"- 状态：{classical.get('status')}（{classical.get('n', 0)} 个配对样本）\n"
+                    f"- 说明：{classical.get('need', classical.get('message', ''))}"
+                )
         if baseline_note:
             md_lines.append(f"\n**对比的前人公式**：{baseline_note}")
         md_path = out_dir / "model_comparison.md"
@@ -1565,6 +1586,17 @@ class ToolHandlers:
         lines.append(f"   📋 {result.get('message')}")
         if baseline_note:
             lines.append(f"   对比公式：{baseline_note}")
+        if classical:
+            if classical.get("status") == "ok":
+                lines.append(
+                    f"   Slack 模型：R²={classical['r2']} | RMSE={classical['rmse']} "
+                    f"（{classical['n']} 个温度-带隙样本）"
+                )
+            else:
+                lines.append(
+                    f"   Slack 模型：{classical.get('status')}——"
+                    f"{classical.get('need', classical.get('message', ''))}"
+                )
         lines.append(f"   报告：{md_path}")
         if explanation:
             lines.append(f"   💡 {explanation[:200]}...")

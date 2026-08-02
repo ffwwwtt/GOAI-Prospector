@@ -1636,6 +1636,64 @@ def compare_models(samples: List[Dict], descriptor_names: List[str]) -> Dict[str
     }
 
 
+def fit_slack_model(samples: List[Dict]) -> Dict[str, Any]:
+    """拟合 Slack 带隙-温度模型：E_g(T) = E_g0 − S·ħω·[coth(ħω/2k_BT) − 1]。
+
+    经典半经验模型（Slack, 1970s；与 Varshni 同属经验带隙-温度关系），
+    用于检验"文献数据是否支持/偏离经典模型"，并作为路线 A 统计验证的对照基线。
+    需要 ≥5 个（温度, 带隙）配对样本（知识图谱行格式：
+    `| 材料 | E_g(eV) | T(K) | 来源 |`，温度描述符为 k 或 °c）。
+    """
+    import numpy as _np
+
+    pts = []
+    for s in samples:
+        desc = s.get("descriptors", {}) or {}
+        t = desc.get("k") or desc.get("°c") or desc.get("℃")
+        if t and s.get("unit") in ("ev", ""):
+            try:
+                pts.append((float(t), float(s["value"])))
+            except (TypeError, ValueError):
+                continue
+    if len(pts) < 5:
+        return {
+            "status": "insufficient",
+            "n": len(pts),
+            "need": "≥5 个（温度, 带隙）配对样本；知识图谱行格式：| 材料 | E_g(eV) | T(K) | 来源 |",
+        }
+
+    T = _np.array([p[0] for p in pts], dtype=float)
+    Eg = _np.array([p[1] for p in pts], dtype=float)
+    k_B = 8.617333262e-5  # eV/K
+
+    def slack(T, eg0, s_hw, hw):
+        return eg0 - s_hw * (1.0 / _np.tanh(hw / (2.0 * k_B * T)) - 1.0)
+
+    try:
+        from scipy.optimize import curve_fit
+        p0 = [float(Eg.max()), float(max(Eg.max() - Eg.min(), 0.05)), 0.02]
+        popt, _pcov = curve_fit(slack, T, Eg, p0=p0, maxfev=20000)
+        pred = slack(T, *popt)
+        ss_res = float(((Eg - pred) ** 2).sum())
+        ss_tot = float(((Eg - Eg.mean()) ** 2).sum())
+        r2 = 1.0 - ss_res / ss_tot if ss_tot else 0.0
+        rmse = float(((Eg - pred) ** 2).mean() ** 0.5)
+        return {
+            "status": "ok",
+            "n": len(pts),
+            "model": "Slack: E_g(T)=E_g0−S·ħω·[coth(ħω/2k_BT)−1]",
+            "params": {
+                "E_g0 (eV)": round(float(popt[0]), 4),
+                "S·ħω (eV)": round(float(popt[1]), 4),
+                "ħω (eV)": round(float(popt[2]), 4),
+            },
+            "r2": round(r2, 4),
+            "rmse": round(rmse, 4),
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 # ═══════════════════════════════════════════════════════════════
 # Main Discovery Engine
 # ═══════════════════════════════════════════════════════════════

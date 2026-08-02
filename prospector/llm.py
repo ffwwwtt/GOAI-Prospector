@@ -450,13 +450,17 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "run_model_comparison",
-            "description": "新规律 vs 基线/前人公式的统计对比：从知识图谱抽取（材料 × 性质数值 × 数值描述符）样本，拟合基线（均值/最优单描述符线性）与候选模型（二次/多特征线性），输出 R²/RMSE 对比表 + LLM 科学解释（含前人公式为何失效）。可选参数 baseline_model 描述要对比的前人公式（如 'Slack model'）。数据点 <5 时返回提示，需先扩充知识图谱。",
+            "description": "新规律 vs 基线/前人公式的统计对比：从知识图谱抽取（材料 × 性质数值 × 数值描述符）样本，拟合基线（均值/最优单描述符线性）与候选模型（二次/多特征线性），输出 R²/RMSE 对比表 + LLM 科学解释（含前人公式为何失效）。可选参数 classical_model='slack' 时额外拟合 Slack 带隙-温度模型（E_g(T)=E_g0−S·ħω·[coth(ħω/2k_BT)−1]，需知识图谱含 | 材料 | E_g(eV) | T(K) | 来源 | 行）；baseline_model 描述要对比的前人公式。数据点 <5 时返回提示，需先扩充知识图谱。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "hypothesis_index": {
                         "type": "integer",
                         "description": "要对比的假设编号（0 开始）"
+                    },
+                    "classical_model": {
+                        "type": "string",
+                        "description": "可选：经典模型拟合，当前支持 'slack'（带隙-温度 coth 模型）"
                     },
                     "baseline_model": {
                         "type": "string",
