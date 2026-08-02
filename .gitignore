@@ -16,6 +16,7 @@ workspace/code/
 .claude/
 .api_key
 *.bak
+*.zip
 补充.md
 
 # Vendor binaries
