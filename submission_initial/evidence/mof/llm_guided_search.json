@@ -1,0 +1,73 @@
+{
+  "purpose": "??? LLM ?????LLM??????????",
+  "method": "??????k-NN ?? + UCB??LLM ???????? 10 ???",
+  "model": "deepseek-v4-flash",
+  "n_iterations": 15,
+  "total_llm_guidance_calls": 16,
+  "hypotheses": [
+    {
+      "hypothesis_index": 0,
+      "title": "MOF-74(Ni)合成条件-微观结构-CO2容量火山形关系",
+      "llm_guidance_calls": 2,
+      "best_score": 0.7522,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 1,
+      "title": "Ni/Co-MOF-74双金属比例-容量非对称协同机制",
+      "llm_guidance_calls": 2,
+      "best_score": 0.981,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 2,
+      "title": "胺功能化MOF最佳负载量与孔道结构预测关系",
+      "llm_guidance_calls": 2,
+      "best_score": 1.0,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 3,
+      "title": "开放金属位点密度与湿度耐受性的权衡曲线",
+      "llm_guidance_calls": 2,
+      "best_score": 0.7949,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 4,
+      "title": "孔径-压力窗口统一描述：从超微孔DAC到中孔高压捕获",
+      "llm_guidance_calls": 2,
+      "best_score": 0.7612,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 5,
+      "title": "缺陷类型决定CO2容量效应方向：占位型（甲酸盐）抑制 vs 造孔型（配体缺失）提升",
+      "llm_guidance_calls": 2,
+      "best_score": 0.9787,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 6,
+      "title": "水效应二象性临界线：吸附机制（物理vs化学）决定水对CO2捕获的符号",
+      "llm_guidance_calls": 2,
+      "best_score": 0.8012,
+      "iterations": 15,
+      "candidates_explored": 26
+    },
+    {
+      "hypothesis_index": 7,
+      "title": "等温线形状决定循环级性能：阶梯等温线MOF的TSA/VSA工作容量与再生能耗优势",
+      "llm_guidance_calls": 2,
+      "best_score": 0.7493,
+      "iterations": 15,
+      "candidates_explored": 26
+    }
+  ]
+}

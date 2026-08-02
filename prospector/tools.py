@@ -1386,10 +1386,9 @@ class ToolHandlers:
                 max_tokens=max_tokens, temperature=0.1,
             )
             msg = resp.choices[0].message
-            return (
-                (msg.content or "").strip()
-                or (getattr(msg, "reasoning_content", "") or "").strip()
-            )
+            # 只返回最终正文（content），绝不回退到 reasoning_content——
+            # 推理草稿（思考过程）不得进入任何提交材料
+            return (msg.content or "").strip()
         except Exception:
             return ""
 
@@ -1613,9 +1612,10 @@ class ToolHandlers:
                 f"标题：{hyp.title}\n材料：{hyp.materials[:5]}\n"
                 f"性质：{hyp.property}\n预期关系：{hyp.expected_relationship}\n"
                 f"证据链：{hyp.evidence_chain[:10]}\n\n"
-                "只输出解释文本。"
+                "只输出最终解释正文（3-5 句中文）。禁止输出任何思考过程、"
+                "元说明、或'以下是我的解释'之类的引导语。"
             )
-            return self._llm_text(prompt, max_tokens=600)
+            return self._llm_text(prompt, max_tokens=900)
         except Exception:
             return ""
 

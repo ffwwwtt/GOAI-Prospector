@@ -1,0 +1,166 @@
+{
+  "hypothesis_index": 5,
+  "title": "缺陷类型决定CO2容量效应方向：占位型（甲酸盐）抑制 vs 造孔型（配体缺失）提升",
+  "materials": [
+    "MOF-74(Mg/Ni/Co)",
+    "甲酸缺陷MOF-74",
+    "配体缺失缺陷MOF-74"
+  ],
+  "property": "CO2吸附容量与Qst（1 bar）",
+  "samples_n": 37,
+  "baseline": {
+    "type": "linear(mm)",
+    "r2": 0.966,
+    "rmse": 6.2144,
+    "descriptor": "mm",
+    "coefficients": {
+      "slope": -9.7898,
+      "intercept": 97.9696
+    }
+  },
+  "candidate": {
+    "type": "quadratic(mm)",
+    "r2": 0.9829,
+    "rmse": 4.4093,
+    "descriptor": "mm",
+    "coefficients": {
+      "a": 0.7279,
+      "b": -17.8786,
+      "c": 111.3093
+    }
+  },
+  "improvement_r2": 0.0169,
+  "message": "????????R? +0.017????? 0.02 ?????????????????????",
+  "explanation": "该拟合结果表明，缺陷类型是调控CO₂吸附容量的关键“开关”：占位型缺陷（如甲酸盐）占据孔道或吸附位点，使有效吸附空间减少，从而抑制容量；而造孔型缺陷（如配体缺失）引入额外孔隙，增大可及体积，从而提升容量。因此，单独用某种全局浓度或结构参数做线性建模时，混合两类缺陷会使效应相互抵消，难以反映方向性变化；二次模型能捕捉同类型缺陷内浓度-容量接近单调、跨类型时方向反转的非线性行为，故拟合优度更高。这揭示的物理化学规律是：缺陷工程对气体吸附的影响并非简单的“越多越好”或“越少越好”，而由缺陷的化学占位效应与几何造孔效应的竞争决定，实际设计需按缺陷类型分别标定构效关系。",
+  "sample_rows": [
+    {
+      "material": "ni",
+      "value": 6.61,
+      "unit": "mmol/g",
+      "descriptors": {
+        "k": 298.0,
+        "bar": 1.0,
+        "°c": 140.0,
+        "h": 24.0
+      }
+    },
+    {
+      "material": "ni",
+      "value": 8.3,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "ni",
+      "value": 3.99,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "甲酸缺陷MOF-74",
+      "value": 5.03,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "ni",
+      "value": 3.62,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "ni",
+      "value": 6.4,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "甲酸缺陷MOF-74",
+      "value": 50.0,
+      "unit": "%",
+      "descriptors": {
+        "kj/mol": 46.0
+      }
+    },
+    {
+      "material": "co)",
+      "value": 2.87,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0,
+        "å": 3.62
+      }
+    },
+    {
+      "material": "ni",
+      "value": 52.0,
+      "unit": "kj/mol",
+      "descriptors": {
+        "kj/mol": 23.0
+      }
+    },
+    {
+      "material": "ni",
+      "value": 10.0,
+      "unit": "%",
+      "descriptors": {
+        "μm": 0.75,
+        "°c": 70.0,
+        "%": 50.0,
+        "mm": 9.95
+      }
+    },
+    {
+      "material": "ni",
+      "value": 75.0,
+      "unit": "kj/mol",
+      "descriptors": {
+        "h": 1.0,
+        "k": 300.0
+      }
+    },
+    {
+      "material": "ni",
+      "value": 35.32,
+      "unit": "kj/mol",
+      "descriptors": {}
+    },
+    {
+      "material": "ni",
+      "value": 96.9,
+      "unit": "%",
+      "descriptors": {}
+    },
+    {
+      "material": "ni",
+      "value": 63.5,
+      "unit": "%",
+      "descriptors": {
+        "h": 6.0,
+        "k": 308.0,
+        "bar": 4.0,
+        "mm": 3.27,
+        "%": 1.74
+      }
+    },
+    {
+      "material": "ni",
+      "value": 8.2,
+      "unit": "mmol/g",
+      "descriptors": {
+        "k": 300.0,
+        "%": 93.0
+      }
+    }
+  ]
+}

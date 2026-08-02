@@ -1,0 +1,173 @@
+{
+  "hypothesis_index": 3,
+  "title": "开放金属位点密度与湿度耐受性的权衡曲线",
+  "materials": [
+    "Mg-MOF-74",
+    "Ni-MOF-74",
+    "Co-MOF-74",
+    "ZIF-94",
+    "en-CPM-200"
+  ],
+  "property": "湿态CO2容量保持率（RH 0-90%）",
+  "samples_n": 25,
+  "baseline": {
+    "type": "linear(mm)",
+    "r2": 0.3035,
+    "rmse": 25.3894,
+    "descriptor": "mm",
+    "coefficients": {
+      "slope": -4.2715,
+      "intercept": 83.7006
+    }
+  },
+  "candidate": {
+    "type": "quadratic(mm)",
+    "r2": 0.8706,
+    "rmse": 10.9452,
+    "descriptor": "mm",
+    "coefficients": {
+      "a": 5.3624,
+      "b": -61.1091,
+      "c": 147.3468
+    }
+  },
+  "improvement_r2": 0.5671,
+  "message": "候选模型显著优于基线（R² 提升 >0.02），支持非线性/多描述符关系",
+  "explanation": "拟合结果表明，开放金属位点密度（OMS密度）与湿态CO₂容量保持率之间并非简单的单调负相关，而是一个先升后降的倒U型关系；二次模型的R²从线性模型的0.3035显著提升至0.8706，说明引入平方项后能更真实地刻画这种非单调权衡。其物理化学本质在于：当OMS密度较低时，增加开放金属位点可增强CO₂吸附能力，同时水竞争吸附对容量保持率的损害尚不显著；但当OMS密度过高时，强亲水位点会优先吸附水分子，形成水簇并占据有效吸附空间，导致湿态CO₂容量急剧下降。因此存在一个最优OMS密度，使“干态吸附能力”与“水竞争耐受性”达到最佳平衡，从而最大化湿态工作容量。前人仅用线性负相关模型失效，正是因为它忽略了“低密度端吸附能力不足”与“高密度端水毒化严重”这两种相反机制的主导地位变化，无法表达这种存在最优点的物理图像。",
+  "sample_rows": [
+    {
+      "material": "Ni-MOF-74",
+      "value": 6.61,
+      "unit": "mmol/g",
+      "descriptors": {
+        "k": 298.0,
+        "bar": 1.0,
+        "°c": 140.0,
+        "h": 24.0
+      }
+    },
+    {
+      "material": "Ni-MOF-74",
+      "value": 8.3,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "ni-mof-74",
+      "value": 3.99,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "co-mof-74",
+      "value": 5.03,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "Ni-MOF-74",
+      "value": 3.62,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "Ni-MOF-74",
+      "value": 6.4,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 1.0
+      }
+    },
+    {
+      "material": "mg-mof-74",
+      "value": 50.0,
+      "unit": "%",
+      "descriptors": {
+        "kj/mol": 46.0
+      }
+    },
+    {
+      "material": "en-CPM-200",
+      "value": 3.4,
+      "unit": "mmol/g",
+      "descriptors": {
+        "bar": 0.15,
+        "°c": 50.0
+      }
+    },
+    {
+      "material": "en-CPM-200",
+      "value": 1.4,
+      "unit": "mmol/g",
+      "descriptors": {
+        "%": 84.0,
+        "ppm": 400.0
+      }
+    },
+    {
+      "material": "en-CPM-200",
+      "value": 1.21,
+      "unit": "mmol/g",
+      "descriptors": {
+        "ppm": 400.0,
+        "%": 90.0
+      }
+    },
+    {
+      "material": "en-CPM-200",
+      "value": 1.43,
+      "unit": "mmol/g",
+      "descriptors": {
+        "°c": 20.0,
+        "%": 70.0,
+        "ppm": 400.0,
+        "mmol/g": 0.95
+      }
+    },
+    {
+      "material": "en-CPM-200",
+      "value": 0.6,
+      "unit": "mmol/g",
+      "descriptors": {
+        "°c": 25.0
+      }
+    },
+    {
+      "material": "zif-94",
+      "value": 2.38,
+      "unit": "mmol/g",
+      "descriptors": {
+        "k": 298.0,
+        "%": 99.2
+      }
+    },
+    {
+      "material": "en-CPM-200",
+      "value": 75.0,
+      "unit": "%",
+      "descriptors": {
+        "mm": 10.0,
+        "%": 5.0,
+        "bar": 0.15,
+        "°c": 45.0
+      }
+    },
+    {
+      "material": "mg-mof-74",
+      "value": 8.2,
+      "unit": "mmol/g",
+      "descriptors": {
+        "k": 300.0,
+        "%": 93.0
+      }
+    }
+  ]
+}
