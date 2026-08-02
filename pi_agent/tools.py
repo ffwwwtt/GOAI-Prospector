@@ -668,7 +668,13 @@ class ToolHandlers:
             try:
                 papers = _json.loads(papers_file.read_text(encoding="utf-8"))
                 if isinstance(papers, dict) and paper_id in papers:
-                    cached_text = str(papers[paper_id])
+                    raw = papers[paper_id]
+                    if isinstance(raw, dict):
+                        cached_text = (
+                            f"{raw.get('title', '')}\n\n{raw.get('abstract', '')}"
+                        ).strip()
+                    else:
+                        cached_text = str(raw)
             except Exception:
                 pass
 
@@ -701,6 +707,18 @@ class ToolHandlers:
             return (
                 "❌ 找不到该论文的元数据。请先 search_papers，"
                 "或检查 paper_id（p1/p2… 对应 papers.json 的键，或 DOI/标题关键词）。"
+            )
+
+        # 提取可用的标题（用于 arXiv 回退）
+        fallback_title = None
+        if meta:
+            fallback_title = meta.get("title")
+        elif cached_text:
+            first = next(
+                (ln.strip() for ln in cached_text.splitlines() if ln.strip()), ""
+            )
+            fallback_title = re.sub(
+                r'^(title|标题)[:\s]+', '', first, flags=re.IGNORECASE,
             )
 
         out_dir = _Path("workspace/data/papers")
@@ -737,21 +755,25 @@ class ToolHandlers:
                     pass
             if not text and meta.get("pdf_url"):
                 try:
-                    import requests as _requests
                     pdf_path = out_dir / f"{safe}.pdf"
-                    resp = _requests.get(
-                        meta["pdf_url"],
-                        headers={"User-Agent": "goai-pi-agent/1.0"},
-                        timeout=60,
-                    )
-                    if resp.status_code == 200 and resp.content[:4] == b"%PDF":
-                        pdf_path.write_bytes(resp.content)
-                        from literature_agent.parser import DocumentParser
-                        doc = DocumentParser().parse(str(pdf_path))
-                        text = doc.full_text or f"# {doc.title}\n\n{doc.abstract}"
-                        source = f"pdf:{doc.parse_engine}"
+                    txt = self._download_and_parse_pdf(meta["pdf_url"], pdf_path)
+                    if txt:
+                        text = txt
+                        source = "pdf:markitdown"
                 except Exception as e:
                     self._print(f"  ⚠️ PDF 获取/解析失败: {e}")
+        if not text and fallback_title:
+            # 无可用链接（含无元数据、仅缓存摘要）→ 按标题去 arXiv 找 PDF
+            try:
+                pdf_url = self._arxiv_pdf_by_title(fallback_title)
+                if pdf_url:
+                    pdf_path = out_dir / f"{safe}.pdf"
+                    txt = self._download_and_parse_pdf(pdf_url, pdf_path)
+                    if txt:
+                        text = txt
+                        source = "pdf:markitdown (arxiv-fallback)"
+            except Exception as e:
+                self._print(f"  ⚠️ arXiv 回退失败: {e}")
         if not text and cached_text:
             text = f"# {paper_id}（缓存摘要）\n\n{cached_text}"
             source = "cached_abstract"
@@ -771,6 +793,52 @@ class ToolHandlers:
             f"✅ 全文已获取（{source}，{len(text)} 字符）→ {md_path}\n\n{shown}"
             + ("\n…[截断，全文已存文件，可 read_file 查看]" if len(text) > 40000 else "")
         )
+
+    def _download_and_parse_pdf(self, url: str, pdf_path: Path) -> Optional[str]:
+        """下载 PDF 并用 MarkItDown 解析为全文 Markdown。"""
+        import requests as _requests
+        resp = _requests.get(
+            url, headers={"User-Agent": "goai-pi-agent/1.0"}, timeout=60,
+        )
+        if resp.status_code != 200 or resp.content[:4] != b"%PDF":
+            return None
+        pdf_path.write_bytes(resp.content)
+        from literature_agent.parser import DocumentParser
+        doc = DocumentParser().parse(str(pdf_path))
+        return doc.full_text or f"# {doc.title}\n\n{doc.abstract}"
+
+    def _arxiv_pdf_by_title(self, title: str) -> Optional[str]:
+        """按标题在 arXiv 检索，返回最相似条目的 PDF 链接（找不到返回 None）。"""
+        from urllib.parse import quote
+        import xml.etree.ElementTree as _ET
+        from difflib import SequenceMatcher
+        import requests as _requests
+
+        q = quote(f'ti:"{title}"')
+        try:
+            resp = _requests.get(
+                f"http://export.arxiv.org/api/query?search_query={q}&max_results=5",
+                headers={"User-Agent": "goai-pi-agent/1.0"},
+                timeout=45,
+            )
+            if resp.status_code != 200:
+                return None
+            ns = {"a": "http://www.w3.org/2005/Atom"}
+            root = _ET.fromstring(resp.text)
+            best, best_ratio = None, 0.0
+            for entry in root.findall("a:entry", ns):
+                et = entry.find("a:title", ns)
+                pdf = entry.find("a:link[@title='pdf']", ns)
+                if et is None or pdf is None:
+                    continue
+                cand = (et.text or "").strip()
+                ratio = SequenceMatcher(None, title.lower(), cand.lower()).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best = pdf.attrib.get("href")
+            return best if best and best_ratio >= 0.55 else None
+        except Exception:
+            return None
 
     def _property_keywords(self, property_name: str) -> List[str]:
         """把假设性质名（中英混排）映射为文献检索关键词。"""

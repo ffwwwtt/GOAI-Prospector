@@ -649,6 +649,60 @@ class MaterialsProjectValidator:
             return None
         return [el for el, _ in parts]
 
+    _FAMILY_MARKERS = (
+        "mof-74", "mof-5", "mof-177", "zif-8", "zif-67", "zif-90",
+        "uio-66", "uio-67", "mil-101", "mil-125", "hkust-1", "irmof-",
+        "mof", "zif", "uio", "mil", "hkust", "cof",
+    )
+
+    _KNOWN_ELEMENTS = frozenset({
+        "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg",
+        "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr",
+        "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br",
+        "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd",
+        "Ag", "Cd", "In", "Sn", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La",
+        "Ce", "Pr", "Nd", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm",
+        "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+        "Tl", "Pb", "Bi", "Po", "At", "Rn",
+    })
+
+    @staticmethod
+    def _material_signature(text: str):
+        """提取（元素集合, 家族名）签名，用于材料名宽松匹配。"""
+        s = str(text or "")
+        low = s.lower()
+        # 先去掉常见气体分子，避免 CO2/N2 等被误当元素（注意保留 Co/No 等元素符号）
+        s = re.sub(
+            r'\b(?:co2|n2|h2o|ch4|o2|h2|n2o|so2|nh3|h2s|no2)\b',
+            " ", s, flags=re.IGNORECASE,
+        )
+        family = ""
+        for fam in MaterialsProjectValidator._FAMILY_MARKERS:
+            if fam in low:
+                family = fam
+                break
+        if family:
+            s = re.sub(re.escape(family) + r"[-\d]*", " ", s, flags=re.IGNORECASE)
+        elements = {
+            e for e in re.findall(r"[A-Z][a-z]?", s)
+            if e in MaterialsProjectValidator._KNOWN_ELEMENTS
+        }
+        return elements, family
+
+    @staticmethod
+    def _sig_match(hyp_sig, heading_sig) -> bool:
+        """签名匹配：家族相同 + 假设元素 ⊆ 标题元素。"""
+        h_elems, h_fam = hyp_sig
+        e_elems, e_fam = heading_sig
+        if h_fam:
+            if e_fam != h_fam:
+                return False
+            if not h_elems:
+                return True       # 只有家族名（如 ZIF-8）→ 家族相同即算
+        if not h_elems:
+            return False
+        return h_elems <= e_elems
+
     def _check_literature_evidence(self, hypothesis: DiscoveryHypothesis) -> Optional[Dict]:
         """文献证据链验证：知识图谱/论文摘要中 ≥2 篇独立论文支持材料+性质。"""
         from pathlib import Path as _Path
@@ -702,6 +756,7 @@ class MaterialsProjectValidator:
             # 标题行 → 该块的材料上下文 + 论文 ID
             heading_mats = []
             heading_papers: set = set()
+            heading_text = ""
             for line in block.splitlines():
                 s = line.strip()
                 if s.startswith("#"):
@@ -710,6 +765,14 @@ class MaterialsProjectValidator:
                     heading_papers.update(
                         p.lower() for p in re.findall(r'\b(p\d+|doi[:/]\S+|arXiv[:/]\S+)\b', s)
                     )
+                    heading_text += " " + s
+            if not heading_mats:
+                # 宽松匹配：元素+家族签名（如 Ni_xCo_y-MOF-74 ↔ Ni/Co-MOF-74）
+                heading_sig = self._material_signature(heading_text)
+                for hm in hypothesis.materials[:5]:
+                    if self._sig_match(self._material_signature(hm), heading_sig):
+                        heading_mats.append(hm)
+                        break
             if not heading_mats:
                 continue
             for line in block.splitlines():
