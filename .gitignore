@@ -18,6 +18,7 @@ workspace/code/
 *.bak
 *.zip
 补充.md
+初赛材料不足分析.md
 
 # Vendor binaries
 vendor/
