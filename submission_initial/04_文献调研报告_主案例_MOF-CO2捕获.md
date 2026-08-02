@@ -121,7 +121,7 @@ MOF-74 是研究最深入的 CO2 吸附体系之一，其高密度 OMS 提供强
 
 | ID | 论文 | DOI/来源 |
 |---|---|---|
-| p17 | MOF-74(Ni) 冷凝回流合成高容量 | 见 literature_cache/papers.json |
+| p17 | MOF-74(Ni) 冷凝回流合成高容量 | 见 evidence/mof/papers.json |
 | p29 | NiCo-MOF-74 双金属微波合成 | 10.1016/j.efmat.2023.01.002 |
 | p121 | Solvent-derived defects suppress adsorption in MOF-74 | 10.1038/s41467-023-38155-8 |
 | p122 | Defect-rich hierarchical porous Mg-MOF-74 | 10.1016/j.cej.2023.144052 |
@@ -137,4 +137,4 @@ MOF-74 是研究最深入的 CO2 吸附体系之一，其高密度 OMS 提供强
 | p158 | Amino acid functionalized MOF-808 in humid flue gas | 10.1021/jacs.1c13368 |
 | p168 | Optimum RH enhances CO2 uptake in M2(dobpdc) | 10.1016/j.cej.2023.147119 |
 
-> 完整 180 篇论文元数据见 `workspace/data/literature_cache/papers.json`；知识图谱 v2.0 见 `knowledge_graph.md`；Gap 分析见 `gap_report.md`；阶段二发现见 `discovery/discovery_report.md`。
+> 完整 180 篇论文元数据见本包 `evidence/mof/papers.json`；知识图谱 v2.0 见 `evidence/mof/knowledge_graph.md`；Gap 分析见 `evidence/mof/gap_report.md`；阶段二发现见 `evidence/mof/discovery_report.md`。
