@@ -834,7 +834,7 @@ class MaterialsProjectValidator:
                     r'(\d+(?:\.\d+)?)\s*'
                     r'(mmol/g|mol/kg|mmol/cm3|cm3/g|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV|'
                     r'W/mK|mW/mK|S/cm|mS/cm|uS/cm|μS/cm|GPa|MPa|g/cm3|mol/m3|vol%|at%|'
-                    r'Å|nm|mm|μm|µm|mbar|mV|°C|℃)',
+                    r'Å|nm|mm|μm|µm|mbar|mV|°C|℃|V|mA/g|mAh/g|Wh/kg|ppm|ppb)',
                     bl, re.IGNORECASE,
                 ):
                     v = abs(float(vm.group(1)))
@@ -1312,7 +1312,8 @@ class NoveltyChecker:
 _SAMPLE_UNIT_RE = re.compile(
     r'(\d+(?:\.\d+)?)\s*'
     r'(mmol/g|mol/kg|mmol/cm3|mg/g|m2/g|cm3/g|kJ/mol|eV|meV|%|W/mK|S/cm|g/cm3|'
-    r'K|°C|℃|bar|Å|nm|h|min|mW/mK|mS/cm|uS/cm|μS/cm|mm|μm|µm|mbar|mV)',
+    r'K|°C|℃|bar|Å|nm|h|min|mW/mK|mS/cm|uS/cm|μS/cm|mm|μm|µm|mbar|mV|'
+    r'V|mA/g|mAh/g|Wh/kg|ppm|ppb|次|圈)',
     re.IGNORECASE,
 )
 
@@ -1390,22 +1391,53 @@ def extract_samples_for_hypothesis(
             if not line_mats:
                 continue
 
-            pairs = [
-                (abs(float(vm.group(1))), (vm.group(2) or "").lower())
-                for vm in _SAMPLE_UNIT_RE.finditer(bl)
-                if 0 < abs(float(vm.group(1))) < 1e7
-            ]
-            if not pairs:
-                continue
-            y, y_unit = None, ""
-            desc: Dict[str, float] = {}
-            for v, u in pairs:
-                if y is None and u in _PROPERTY_VALUE_UNITS:
-                    y, y_unit = v, u
+            # 表格行按单元格解析：| 材料 | 性质值 | 条件... | 来源 |
+            cells = [c.strip() for c in s.split("|")] if "|" in s else []
+            if len(cells) >= 3:
+                prop_cell = cells[2]
+                cell_pairs = [
+                    (abs(float(vm.group(1))), (vm.group(2) or "").lower())
+                    for vm in _SAMPLE_UNIT_RE.finditer(prop_cell.lower())
+                    if 0 < abs(float(vm.group(1))) < 1e7
+                ]
+                bare = re.findall(r'\d+(?:\.\d+)?', prop_cell)
+                if cell_pairs:
+                    y, y_unit = cell_pairs[0]
+                elif bare:
+                    y, y_unit = abs(float(bare[0])), ""
                 else:
+                    continue
+                desc: Dict[str, float] = {}
+                for other_cell in cells[3:]:
+                    for vm in _SAMPLE_UNIT_RE.finditer(other_cell.lower()):
+                        v = abs(float(vm.group(1)))
+                        if 0 < v < 1e7:
+                            desc.setdefault((vm.group(2) or "").lower(), v)
+                for v, u in cell_pairs[1:]:
                     desc.setdefault(u, v)
-            if y is None:
-                y, y_unit = pairs[0]
+            else:
+                # 非表格行
+                pairs = [
+                    (abs(float(vm.group(1))), (vm.group(2) or "").lower())
+                    for vm in _SAMPLE_UNIT_RE.finditer(bl)
+                    if 0 < abs(float(vm.group(1))) < 1e7
+                ]
+                if not pairs:
+                    bare = re.findall(r'\d+(?:\.\d+)?', bl)
+                    if not bare:
+                        continue
+                    y, y_unit = abs(float(bare[0])), ""
+                    desc = {}
+                else:
+                    y, y_unit = None, ""
+                    desc = {}
+                    for v, u in pairs:
+                        if y is None and u in _PROPERTY_VALUE_UNITS:
+                            y, y_unit = v, u
+                        else:
+                            desc.setdefault(u, v)
+                    if y is None:
+                        y, y_unit = pairs[0]
             key = (line_mats[0], round(y, 4))
             if key in seen:
                 continue

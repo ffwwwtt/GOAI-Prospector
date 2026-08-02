@@ -760,7 +760,7 @@ class ToolHandlers:
         r'(\d+(?:\.\d+)?)\s*'
         r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|wt%|m2/g|bar|K|%|h|min|eV|'
         r'W/mK|mW/mK|S/cm|mS/cm|uS/cm|μS/cm|GPa|MPa|g/cm3|cm3/g|meV|mol/m3|'
-        r'vol%|at%|Å|nm|mm|μm|µm|mbar|mV|°C|℃)',
+        r'vol%|at%|Å|nm|mm|μm|µm|mbar|mV|°C|℃|V|mA/g|mAh/g|Wh/kg|ppm|ppb)',
         re.IGNORECASE,
     )
 
