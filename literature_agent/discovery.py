@@ -615,7 +615,7 @@ class MaterialsProjectValidator:
         "formation energy": ["formation energy", "formation enthalpy", "生成能", "形成能"],
         "capacity": [
             "capacity", "uptake", "loading", "吸附容量", "吸附量",
-            "容量", "工作容量", "co2容量", "co2 容量",
+            "容量", "工作容量",
         ],
         "selectivity": ["selectivity", "separation factor", "选择性", "分离因子", "分离选择性"],
         "heat": ["isosteric heat", "qst", "enthalpy", "吸附热", "等量吸附热", "吸附焓", "焓"],
@@ -831,7 +831,9 @@ class MaterialsProjectValidator:
                 )
                 papers.update(heading_papers)
                 for vm in re.finditer(
-                    r'(\d+(?:\.\d+)?)\s*(mmol/g|mol/kg|mmol/cm3|cm3/g|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV)',
+                    r'(\d+(?:\.\d+)?)\s*'
+                    r'(mmol/g|mol/kg|mmol/cm3|cm3/g|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV|'
+                    r'W/mK|S/cm|GPa|MPa|g/cm3|mol/m3|vol%|at%|Å|nm)',
                     bl, re.IGNORECASE,
                 ):
                     v = abs(float(vm.group(1)))

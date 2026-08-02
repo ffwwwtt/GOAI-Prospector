@@ -198,7 +198,8 @@ _MATERIAL_RE = re.compile(
 
 _VALUE_RE = re.compile(
     r'(\d+(?:\.\d+)?)\s*'
-    r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|kj/mol|wt%|m2/g|m²/g|bar|K|°C|℃|%|h|min|eV|meV)',
+    r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|kj/mol|wt%|m2/g|m²/g|bar|K|°C|℃|%|h|min|eV|meV|'
+    r'W/mK|S/cm|GPa|MPa|g/cm3|cm3/g|mol/m3|vol%|at%|Å|nm)',
     re.IGNORECASE,
 )
 

@@ -737,9 +737,29 @@ class ToolHandlers:
         "热电": ["seebeck", "zt", "power factor"],
         "电导": ["conductivity", "ionic conductivity"],
         "强度": ["tensile strength", "yield strength"],
+        # 英文性质名 → 中文别名（让中文知识图谱标签也能匹配，保证通用性）
+        "thermal conductivity": ["热导率", "导热系数", "导热"],
+        "conductivity": ["电导率", "导电性", "离子电导率"],
+        "band gap": ["带隙", "能隙", "禁带宽度"],
+        "capacity": ["吸附容量", "容量", "吸附量"],
+        "selectivity": ["选择性", "分离因子"],
+        "stability": ["稳定性", "循环稳定性"],
+        "efficiency": ["效率"],
+        "formation energy": ["形成能", "生成能"],
+        "surface area": ["比表面积", "表面积"],
+        "hardness": ["硬度"],
+        "melting point": ["熔点"],
+        "elastic modulus": ["弹性模量", "杨氏模量"],
+        "seebeck": ["塞贝克系数", "塞贝克"],
+        "figure of merit": ["热电优值", "zt值"],
+        "density": ["密度"],
+        "pressure": ["压力", "压强"],
+        "temperature": ["温度"],
     }
     _VALUE_UNIT_RE = re.compile(
-        r'(\d+(?:\.\d+)?)\s*(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|wt%|m2/g|bar|K|%|h|min|eV)',
+        r'(\d+(?:\.\d+)?)\s*'
+        r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|wt%|m2/g|bar|K|%|h|min|eV|'
+        r'W/mK|S/cm|GPa|MPa|g/cm3|cm3/g|meV|mol/m3|vol%|at%|Å|nm)',
         re.IGNORECASE,
     )
 
@@ -994,6 +1014,16 @@ class ToolHandlers:
          ("焓", "qst", "enthalpy", "等量吸附热", "吸附热")),
         (("m2/g",),
          ("bet", "surface area", "比表面积", "表面积")),
+        (("w/mk",),
+         ("导热", "thermal conductivity", "热导率")),
+        (("s/cm",),
+         ("电导", "conductivity", "离子电导")),
+        (("gpa", "mpa"),
+         ("模量", "modulus", "硬度", "hardness", "强度", "strength")),
+        (("g/cm3",),
+         ("密度", "density")),
+        (("å", "nm"),
+         ("孔径", "pore size", "晶格", "lattice")),
         (("bar",),
          ("压力", "pressure")),
         (("k",),
@@ -1876,9 +1906,25 @@ class ToolHandlers:
             "---\n",
         ]
 
-        # 统计来源分布
+        # 统计来源分布 + 通用高频关键词（不绑定任何主题）
         sources = {}
-        keywords_all = set()
+        term_counter = {}
+        _STOPWORDS = {
+            "the", "and", "for", "with", "from", "that", "this", "these",
+            "those", "are", "was", "were", "been", "have", "has", "had",
+            "will", "would", "can", "could", "should", "may", "might",
+            "not", "but", "its", "their", "our", "into", "onto", "upon",
+            "using", "used", "based", "such", "than", "then", "when",
+            "where", "which", "while", "within", "through", "between",
+            "about", "after", "before", "during", "also", "however",
+            "although", "more", "most", "less", "least", "new", "novel",
+            "high", "low", "large", "small", "good", "better", "best",
+            "doi", "vol", "pp", "fig", "table", "et", "al", "de", "la",
+            "le", "paper", "study", "studies", "results", "result", "show",
+            "shows", "shown", "found", "report", "reported", "data",
+            "materials", "material", "properties", "property", "structure",
+            "structural", "methods", "method", "synthesis", "synthesized",
+        }
         for pid, text in papers.items():
             text_str = str(text)
             # 尝试提取来源信息
@@ -1888,15 +1934,16 @@ class ToolHandlers:
                 sources['arxiv'] = sources.get('arxiv', 0) + 1
             else:
                 sources['unknown'] = sources.get('unknown', 0) + 1
-            # 收集关键词
-            for kw in ['MOF', 'CO2', 'adsorption', 'capture', 'selectivity',
-                        'perovskite', 'catalysis', 'battery', 'stability',
-                        'synthesis', 'ZIF', 'UiO', 'MIL', 'HKUST']:
-                if kw.lower() in text_str.lower():
-                    keywords_all.add(kw)
+            for tok in re.findall(r'[a-z][a-z0-9-]{2,}', text_str.lower()):
+                if tok not in _STOPWORDS:
+                    term_counter[tok] = term_counter.get(tok, 0) + 1
+        common_keywords = [
+            t for t, c in sorted(term_counter.items(), key=lambda kv: kv[1], reverse=True)
+            if c >= 2
+        ][:15]
 
         md_lines.append(f"**Sources:** {', '.join(f'{k}({v})' for k, v in sources.items())}")
-        md_lines.append(f"**Common keywords:** {', '.join(sorted(keywords_all)[:20])}")
+        md_lines.append(f"**Common keywords:** {', '.join(common_keywords) if common_keywords else '—'}")
         md_lines.append("\n---\n")
 
         # 逐篇列出摘要
