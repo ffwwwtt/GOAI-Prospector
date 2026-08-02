@@ -1024,6 +1024,11 @@ class ToolHandlers:
         engine = self.survey_state.get("discovery_engine")
         if engine is None:
             engine = DiscoveryEngine()
+            self.survey_state["discovery_engine"] = engine
+        # LLM × 搜索融合：让 LLM 评估中间候选合理性并引导剪枝（路线 A 核心评分点）
+        from literature_agent.discovery import BayesianOptimizer, MCTSSearcher
+        engine.bayes_opt = BayesianOptimizer(llm_guide=self._llm_guide_candidates)
+        engine.mcts_searcher = MCTSSearcher(llm_guide=self._llm_guide_node)
 
         # Run search
         out_dir = _Path("workspace/outputs/literature_survey/discovery")
@@ -1043,6 +1048,8 @@ class ToolHandlers:
                 "property_keywords": evid["prop_keywords"][:10],
                 "literature_values": evid["values"][:20],
             },
+            "llm_guidance": True,
+            "llm_guidance_calls": getattr(self, "_llm_guide_calls", 0),
         }
 
         if method in ("bayesian", "hybrid"):
@@ -1078,6 +1085,9 @@ class ToolHandlers:
             hyp.candidates_explored = len(log) * 5
             hyp.search_iterations = n_iterations * 5
 
+        # 搜索完成后的 LLM 引导实际调用次数
+        search_results["llm_guidance_calls"] = getattr(self, "_llm_guide_calls", 0)
+
         # 写回搜索状态到 hypotheses.json（供 generate_discovery_report 汇总）
         hypotheses_data[idx] = asdict(hyp)
         (out_dir / "hypotheses.json").write_text(
@@ -1097,8 +1107,9 @@ class ToolHandlers:
             f"   Best score: {best_score:.3f}\n"
             f"   Evidence: {len(evid['blocks'])} blocks, {len(evid['material_tokens'])} materials, "
             f"{len(evid['values'])} literature values\n"
+            f"   LLM 引导：已启用（{getattr(self, '_llm_guide_calls', 0)} 次中间评估）\n"
             f"   Updated confidence: {hyp.confidence:.2f}\n\n"
-            f"Next: validate_discovery(hypothesis_index={idx}) to cross-validate against external databases."
+            f"Next: validate_discovery(hypothesis_index={idx} 或 'all') 完成双轨验证。"
         )
 
     def _apply_validation(self, hyp) -> tuple:
@@ -1193,6 +1204,84 @@ class ToolHandlers:
             (f"\n   Notes: " + "; ".join(notes) if notes else "") +
             f"\n\nNext: generate_discovery_report to produce the final Route A report."
         )
+
+    # ── LLM × 搜索融合：中间候选的科学合理性评估与剪枝引导 ──
+
+    def _llm_text(self, prompt: str, max_tokens: int = 1000) -> str:
+        """调用 DeepSeek 返回纯文本；失败返回空串，保证搜索流程不中断。"""
+        try:
+            from utils.config import DEEPSEEK_API_KEY, DEEPSEEK_BASE_URL, DEEPSEEK_MODEL
+            from openai import OpenAI
+            client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+            resp = client.chat.completions.create(
+                model=DEEPSEEK_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens, temperature=0.1,
+            )
+            msg = resp.choices[0].message
+            return (
+                (msg.content or "").strip()
+                or (getattr(msg, "reasoning_content", "") or "").strip()
+            )
+        except Exception:
+            return ""
+
+    def _llm_guide_candidates(self, candidates: list) -> list:
+        """LLM 评估一组中间候选参数（贝叶斯优化），返回带 score 的副本。"""
+        self._llm_guide_calls = getattr(self, "_llm_guide_calls", 0) + 1
+        if not candidates:
+            return candidates
+        import json as _json
+        try:
+            prompt = (
+                "你是材料科学评审。以下是一组构效关系搜索的中间候选参数"
+                "（性质数值/组成比例/温度等）。请评估每个候选的科学合理性，打分 0-1：\n"
+                "1=完全合理（落在文献常见范围），0=明显不合理（如温度远超物理上限、"
+                "组成超出合理掺杂范围）。\n"
+                '只返回 JSON：{"scores": [0.8, 0.3, ...]}，顺序与输入一致，不要输出其他内容。\n\n'
+                "候选列表：\n" + _json.dumps(candidates, ensure_ascii=False)[:3000]
+            )
+            reply = self._llm_text(prompt, max_tokens=600)
+            m = re.search(r'\{[\s\S]*\}', reply)
+            if not m:
+                return candidates
+            data = _json.loads(m.group(0))
+            scores = data.get("scores") or []
+            out = []
+            for i, c in enumerate(candidates):
+                s = scores[i] if i < len(scores) else None
+                item = dict(c)
+                if isinstance(s, (int, float)) and 0 <= s <= 1:
+                    item["score"] = float(s)
+                out.append(item)
+            return out
+        except Exception:
+            return candidates
+
+    def _llm_guide_node(self, node_state: dict):
+        """LLM 评估 MCTS 节点状态是否科学合理，返回 (is_promising, adjustment)。"""
+        self._llm_guide_calls = getattr(self, "_llm_guide_calls", 0) + 1
+        import json as _json
+        try:
+            prompt = (
+                "你是材料科学评审。以下是一个材料构效关系搜索的节点状态。"
+                "判断该方向是否值得继续探索。\n"
+                '只返回 JSON：{"is_promising": true/false, "adjustment": 0.0}，'
+                "adjustment 为 -0.3~0.3 的合理度修正。不要输出其他内容。\n\n"
+                "节点状态：\n" + _json.dumps(node_state, ensure_ascii=False)[:1500]
+            )
+            reply = self._llm_text(prompt, max_tokens=300)
+            m = re.search(r'\{[\s\S]*\}', reply)
+            if not m:
+                return True, 0.0
+            data = _json.loads(m.group(0))
+            promising = bool(data.get("is_promising", True))
+            adj = data.get("adjustment", 0.0)
+            if not isinstance(adj, (int, float)):
+                adj = 0.0
+            return promising, float(max(-0.3, min(0.3, adj)))
+        except Exception:
+            return True, 0.0
 
     def h_generate_discovery_report(self, args: dict) -> str:
         """生成路线 A 发现报告。"""

@@ -136,6 +136,9 @@ SURVEY_SYSTEM_PROMPT = r"""你是一个自主材料科学研究智能体。你�
   hypothesis_index  (必填) 假设编号，0 开始
   n_iterations      搜索轮数，默认 30，最大 100
   search_method      可选，"bayesian"|"mcts"|"hybrid"
+行为：搜索过程中 **LLM 会评估中间候选的科学合理性并引导剪枝/聚焦**
+      （贝叶斯初始种群与每 10 轮方向评估；MCTS 节点合理性判定），
+      评估次数记录在 search_hN.json 的 llm_guidance_calls，构成 LLM×搜索融合的可审计证据。
 示例：
   run_discovery_search(hypothesis_index=0, n_iterations=50)
 ```
