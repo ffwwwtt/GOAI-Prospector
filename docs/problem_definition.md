@@ -95,6 +95,9 @@ generate_hypotheses（LLM 生成假设）
 
 - **商业 API 披露**：DeepSeek（推理，`deepseek-v4-flash`）、Sciverse（文献检索）、Materials Project（外部验证）——调用环节、费用假设、替代方案（任意 OpenAI 兼容端点 / 纯 arXiv 检索）均已披露。
 - **密钥管理**：`.api_key` 已 gitignore，不入库。
+- **闭源模型使用说明**：选择 DeepSeek（闭源推理模型）因其推理质量/成本比与 1M 上下文窗口；迁移成本低——OpenAI 兼容接口，切换端点仅需改环境变量；对可复现性的影响通过"论文 ID 证据链可独立核验"缓解。
+- **基于已有项目**：`markitdown_utils/` 改编自微软 markitdown（MIT，Copyright Adam Fourney），仅保留 PDF/DOCX/HTML 转换器；Agent 系统其余部分均为本项目原创。
+- **第三方依赖与许可证**：依赖见 `requirements.txt`（均为开源许可）；`vendor/bash` 为 MSYS2 Git Bash（GPLv2+），仅用于 Windows 兼容运行环境，未做修改。
 - **复现命令**：
   ```bash
   pip install -r requirements.txt

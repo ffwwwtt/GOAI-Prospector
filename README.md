@@ -122,6 +122,9 @@ literature_agent/
 - **商业 API**：DeepSeek（推理，`deepseek-v4-flash`）、Sciverse（文献检索）、Materials Project / NOMAD（外部数据库验证）。调用环节见 `utils/config.py`、`literature_agent/search.py`、`literature_agent/discovery.py`；替代方案：任意 OpenAI 兼容端点（环境变量切换）、纯 arXiv 检索（零成本）。费用假设：600s 单轮约数十次 LLM 调用。对可复现性的影响：LLM 结论由 Agent 携带论文 ID 证据链，可被独立核验。
 - **数据来源**：arXiv 摘要/全文为开放获取；Sciverse 仅取标题+摘要用于内部调研，不对外再分发；Materials Project / NOMAD 仅查询。缓存位于 `workspace/data/literature_cache/`（已 gitignore）。
 - **密钥管理**：`.api_key` 已 gitignore，不入库。
+- **闭源模型使用说明**：选择 DeepSeek（闭源推理模型）因其推理质量/成本比与 1M 上下文窗口；迁移成本低——OpenAI 兼容接口，切换端点仅需改环境变量（`DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`）；对可复现性的影响通过"论文 ID 证据链可独立核验"缓解。
+- **基于已有项目**：`markitdown_utils/` 改编自微软 markitdown（MIT，Copyright Adam Fourney），仅保留 PDF/DOCX/HTML 转换器并适配科学文献解析；Agent 系统其余部分均为本项目原创。
+- **第三方依赖与许可证**：依赖见 `requirements.txt`（均为开源许可）；`vendor/bash` 为 MSYS2 Git Bash（GPLv2+），仅用于 Windows 兼容运行环境，未做修改。
 
 ## 许可
 
