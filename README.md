@@ -115,7 +115,7 @@ literature_agent/
 - **随机种子**：如需固定，可设置 `PYTHONHASHSEED` 与 `numpy.random.seed`（默认不固定）；
 - **复现命令**：`python main.py --topic "<任意材料主题>" --budget 1800`，运行结束后检查输出结构中的五件套与 discovery/ 产物。
 
-跨主题验证（MOF/CO₂、卤化物钙钛矿、热电、锂电正极）结果见 `submission_initial/05_跨主题验证报告.md`。
+跨主题验证（MOF/CO₂、卤化物钙钛矿、热电、锂电正极）结果见 `submission_initial/03_跨主题验证报告.md`。
 
 ## 合规披露
 
