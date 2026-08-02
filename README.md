@@ -81,7 +81,7 @@ main.py                     # 入口：参数解析 + 预算 + 异常处理
 pi_agent/
 ├── agent.py                # PiAgent 主循环（事件驱动 + 状态机 + 工具管线）
 ├── llm.py                  # LLM 调用 + 工具 schema（DeepSeek/OpenAI 兼容）
-├── tools.py                # 19 个工具实现（含文献调研/发现类工具）
+├── tools.py                # 22 个工具实现（含文献调研/发现类工具）
 ├── prompts.py              # 系统提示词（两阶段流程 + 预算策略）
 ├── state_machine.py        # Agent 状态机（IDLE→RUN→DONE 等）
 ├── events.py / context.py / session.py / config.py

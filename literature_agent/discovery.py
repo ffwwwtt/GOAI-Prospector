@@ -24,6 +24,7 @@ import json
 import math
 import os
 import random
+import re
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -606,6 +607,149 @@ class MaterialsProjectValidator:
     def __init__(self, mp_api_key: str = None):
         self.mp_api_key = mp_api_key or os.environ.get("MATERIALS_PROJECT_API_KEY", "")
 
+    # ── 文献证据链验证（有机/框架材料的补充验证通道）──
+
+    _LIT_PROPERTY_KWS = {
+        "band gap": ["band gap", "bandgap", "带隙", "能隙"],
+        "formation energy": ["formation energy", "formation enthalpy", "生成能", "形成能"],
+        "capacity": ["capacity", "uptake", "loading", "吸附容量", "吸附量"],
+        "selectivity": ["selectivity", "separation factor", "选择性", "分离因子"],
+        "heat": ["isosteric heat", "qst", "enthalpy", "吸附热", "焓"],
+        "stability": ["stability", "cyclability", "循环稳定性", "稳定性"],
+        "efficiency": ["efficiency", "pce", "效率"],
+        "surface area": ["surface area", "bet", "比表面积"],
+        "conductivity": ["conductivity", "电导率"],
+        "diffusion": ["diffusion", "kinetics", "扩散"],
+    }
+
+    _ORGANIC_MARKERS = (
+        "mof", "zif", "mil-", "uio", "hkust", "irmof", "cof",
+        "polymer", "pvdf", "peo", "ma-", "fa-", "ch3nh3", "ch(nh2)2",
+    )
+
+    @staticmethod
+    def _is_organic_framework(material: str) -> bool:
+        m = (material or "").lower()
+        if any(mk in m for mk in MaterialsProjectValidator._ORGANIC_MARKERS):
+            return True
+        # 含 C 且含 H 且含数字的分子式 → 视为有机类（如 C60、C6H6 等）
+        return "c" in m and "h" in m and any(ch.isdigit() for ch in m)
+
+    @staticmethod
+    def _formula_to_elements(formula: str) -> Optional[List[str]]:
+        """从简单化学式提取元素列表（Fe2O3 → ['Fe','O']）；无法解析时返回 None。"""
+        f = (formula or "").strip()
+        if not f or any(ch in f for ch in " -_()[]{}.,;"):
+            return None
+        parts = re.findall(r'([A-Z][a-z]?)(\d*)', f)
+        if not parts or len(parts) > 5:
+            return None
+        rebuilt = "".join(el + (n or "1") for el, n in parts)
+        if rebuilt.lower() != f.lower():
+            return None
+        return [el for el, _ in parts]
+
+    def _check_literature_evidence(self, hypothesis: DiscoveryHypothesis) -> Optional[Dict]:
+        """文献证据链验证：知识图谱/论文摘要中 ≥2 篇独立论文支持材料+性质。"""
+        from pathlib import Path as _Path
+
+        source_text = ""
+        for cand in (
+            "workspace/outputs/literature_survey/knowledge_graph.md",
+            "workspace/outputs/literature_survey/paper_summaries.md",
+        ):
+            p = _Path(cand)
+            if p.exists():
+                try:
+                    source_text += p.read_text(encoding="utf-8", errors="replace") + "\n"
+                except OSError:
+                    continue
+        papers_dir = _Path("workspace/data/papers")
+        if papers_dir.exists():
+            for md in sorted(papers_dir.glob("*.md")):
+                try:
+                    source_text += md.read_text(encoding="utf-8", errors="replace") + "\n"
+                except OSError:
+                    continue
+        if not source_text.strip():
+            return None
+
+        target = (hypothesis.property or "").lower()
+        kws: List[str] = []
+        for key, aliases in self._LIT_PROPERTY_KWS.items():
+            if key in target or target in key:
+                kws.extend(aliases)
+        if not kws:
+            kws = [t for t in re.split(r'[\s/]+', target) if len(t) >= 3][:3]
+        if not kws:
+            return None
+
+        mats = []
+        for m in hypothesis.materials[:5]:
+            for part in re.split(r'[/\s,，、]+', m or ""):
+                part = part.strip().lower()
+                if len(part) >= 2:
+                    mats.append(part)
+        if not mats:
+            return None
+
+        papers: set = set()
+        values: List[float] = []
+        blocks = [b for b in re.split(r'\n(?=#{1,3} )', source_text) if len(b.strip()) > 40]
+        if not blocks:
+            blocks = [source_text]
+        for block in blocks:
+            # 标题行 → 该块的材料上下文 + 论文 ID
+            heading_mats = []
+            heading_papers: set = set()
+            for line in block.splitlines():
+                s = line.strip()
+                if s.startswith("#"):
+                    sl = s.lower()
+                    heading_mats.extend(mt for mt in mats if mt in sl)
+                    heading_papers.update(
+                        p.lower() for p in re.findall(r'\b(p\d+|doi[:/]\S+|arXiv[:/]\S+)\b', s)
+                    )
+            if not heading_mats:
+                continue
+            for line in block.splitlines():
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                bl = s.lower()
+                if not any(kw in bl for kw in kws):
+                    continue
+                papers.update(
+                    p.lower() for p in re.findall(r'\b(p\d+|doi[:/]\S+|arXiv[:/]\S+)\b', bl)
+                )
+                papers.update(heading_papers)
+                for vm in re.finditer(
+                    r'(\d+(?:\.\d+)?)\s*(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV)',
+                    bl, re.IGNORECASE,
+                ):
+                    v = abs(float(vm.group(1)))
+                    if 0 < v < 1e6:
+                        values.append(v)
+
+        values = sorted(set(round(v, 3) for v in values))[:20]
+        if len(papers) >= 2:
+            return {
+                "match": True,
+                "support_level": "literature",
+                "papers": sorted(papers),
+                "values": values,
+                "source": "knowledge_graph.md + paper_summaries.md",
+            }
+        if papers:
+            return {
+                "match": False,
+                "support_level": "literature",
+                "papers": sorted(papers),
+                "values": values,
+                "note": "仅 1 篇独立论文支撑，不足以判定",
+            }
+        return None
+
     def validate(self, hypothesis: DiscoveryHypothesis) -> Dict[str, Any]:
         """对假设进行外部数据库交叉验证。
 
@@ -613,7 +757,11 @@ class MaterialsProjectValidator:
             {
                 "materials_project": {...},
                 "oqmd": {...},
+                "nomad": {...},
+                "literature": {...},
                 "overall_match": bool,
+                "validation_source": "database" | "literature" | "none",
+                "validation_notes": [...],
                 "supporting_evidence": [...],
             }
         """
@@ -629,11 +777,41 @@ class MaterialsProjectValidator:
         if oqmd_result:
             results["oqmd"] = oqmd_result
 
-        # Aggregate
-        overall = any(
+        # NOMAD (公开 REST API，无需 key)
+        nomad_result = self._check_nomad(hypothesis)
+        if nomad_result:
+            results["nomad"] = nomad_result
+
+        # 数据库命中
+        db_match = any(
             r.get("match", False) for r in results.values()
             if isinstance(r, dict)
         )
+
+        # 文献证据链验证（数据库不覆盖有机/框架材料时的补充通道）
+        lit_result = self._check_literature_evidence(hypothesis)
+        validation_notes: List[str] = []
+        if lit_result and lit_result.get("match"):
+            results["literature"] = lit_result
+            validation_notes.append(
+                "无机数据库未覆盖/未命中时，文献证据链（≥2 篇独立论文）作为补充验证。"
+            )
+        elif not db_match:
+            organic = [
+                m for m in hypothesis.materials[:5]
+                if self._is_organic_framework(m)
+            ]
+            if organic:
+                validation_notes.append(
+                    f"材料 {', '.join(organic)} 疑似有机/框架材料，"
+                    "MP/NOMAD/OQMD 无机库通常不覆盖；请以文献证据链或实验验证为准。"
+                )
+            if lit_result:
+                results["literature"] = lit_result
+            else:
+                validation_notes.append("未找到任何数据库记录与文献证据支撑。")
+
+        overall = db_match or bool(lit_result and lit_result.get("match"))
 
         evidence = []
         for db, r in results.items():
@@ -642,6 +820,11 @@ class MaterialsProjectValidator:
 
         return {
             "overall_match": overall,
+            "validation_source": (
+                "database" if db_match
+                else ("literature" if lit_result and lit_result.get("match") else "none")
+            ),
+            "validation_notes": validation_notes,
             "databases_checked": list(results.keys()),
             "supporting_evidence": evidence,
             "details": results,
@@ -651,6 +834,10 @@ class MaterialsProjectValidator:
         """查询 Materials Project 数据库。"""
         if not self.mp_api_key:
             return None
+        try:
+            import requests as _requests
+        except Exception:
+            return None
 
         results = {"match": False, "matching_entries": [], "materials_found": []}
 
@@ -659,14 +846,34 @@ class MaterialsProjectValidator:
                 url = (
                     f"https://api.materialsproject.org/materials/summary/?"
                     f"formula={material}&_limit=5"
+                    "&_fields=material_id,formula_pretty,band_gap,formation_energy_per_atom"
                 )
-                headers = {"X-API-KEY": self.mp_api_key}
-                import urllib.request
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
+                headers = {
+                    "X-API-KEY": self.mp_api_key,
+                    "User-Agent": "goai-pi-agent/1.0 (literature-driven materials discovery)",
+                }
+                resp = _requests.get(url, headers=headers, timeout=15)
+                if resp.status_code != 200:
+                    continue
+                data = resp.json()
 
-                for entry in data.get("data", []):
+                entries = data.get("data", [])
+                match_type = "exact_formula"
+                # 精确式无结果 → 元素系回退（如 Fe2O3 → Fe-O）
+                if not entries:
+                    elems = self._formula_to_elements(material)
+                    if elems:
+                        fallback_url = (
+                            f"https://api.materialsproject.org/materials/summary/?"
+                            f"formula={'-'.join(elems)}&_limit=5"
+                            "&_fields=material_id,formula_pretty,band_gap,formation_energy_per_atom"
+                        )
+                        fb = _requests.get(fallback_url, headers=headers, timeout=15)
+                        if fb.status_code == 200:
+                            entries = fb.json().get("data", [])
+                            match_type = "element_system"
+
+                for entry in entries:
                     mp_id = entry.get("material_id", "")
                     formula = entry.get("formula_pretty", "")
                     band_gap = entry.get("band_gap", None)
@@ -678,19 +885,99 @@ class MaterialsProjectValidator:
                             "formula": formula,
                             "band_gap": band_gap,
                             "formation_energy": formation_energy,
+                            "match_type": match_type,
                         })
 
                         # 检查是否匹配目标性质
                         if hypothesis.property.lower() in ("band gap", "bandgap") and band_gap:
                             results["match"] = True
                             results["matching_entries"].append(
-                                f"{formula} (MP {mp_id}): band gap = {band_gap} eV"
+                                f"{formula} (MP {mp_id}, {match_type}): band gap = {band_gap} eV"
                             )
                         elif hypothesis.property.lower() in ("formation energy",) and formation_energy:
                             results["match"] = True
                             results["matching_entries"].append(
-                                f"{formula} (MP {mp_id}): formation energy = {formation_energy} eV/atom"
+                                f"{formula} (MP {mp_id}, {match_type}): "
+                                f"formation energy = {formation_energy} eV/atom"
                             )
+            except Exception:
+                continue
+
+        return results if results["materials_found"] else None
+
+    NOMAD_QUERY_URL = "https://nomad-lab.eu/prod/v1/api/v1/entries/query"
+
+    def _check_nomad(self, hypothesis: DiscoveryHypothesis) -> Optional[Dict]:
+        """查询 NOMAD 开放材料数据库（公开 API，无需 key）。
+
+        NOMAD 是欧洲开放材料数据中心（nomad-lab.eu），按 FAIR 原则收录大量
+        DFT 计算数据。这里用条目元数据做定性匹配：材料存在 + 电子/能隙数据存在。
+        能隙具体数值存于 archive（SI 单位），元数据层不返回，故不强行换算，
+        仅如实标注"band-gap data present"。
+        """
+        if not hypothesis.materials:
+            return None
+        try:
+            import requests as _requests
+        except Exception:
+            return None
+
+        target_prop = (hypothesis.property or "").lower()
+        want_band_gap = target_prop in ("band gap", "bandgap")
+
+        results = {"match": False, "matching_entries": [], "materials_found": []}
+
+        for material in hypothesis.materials[:5]:
+            formula = (material or "").strip()
+            if not formula:
+                continue
+            try:
+                payload = {
+                    "query": {"results.material.chemical_formula_hill": formula},
+                    "required": {
+                        "results.material.chemical_formula_hill": True,
+                        "results.material.material_id": True,
+                        "results.material.symmetry.space_group_symbol": True,
+                        "results.properties.n_calculations": True,
+                        "results.properties.electronic.dos_electronic.band_gap": True,
+                        "results.properties.electronic.band_structure": True,
+                    },
+                    "pagination": {"page_size": 3},
+                }
+                resp = _requests.post(self.NOMAD_QUERY_URL, json=payload, timeout=20)
+                if resp.status_code != 200:
+                    continue
+                for entry in (resp.json().get("data", []) or [])[:3]:
+                    res = entry.get("results", {}) or {}
+                    mat = res.get("material", {}) or {}
+                    props = res.get("properties", {}) or {}
+                    elec = props.get("electronic") or {}
+                    dos_bg = (elec.get("dos_electronic") or {}).get("band_gap")
+                    bs = elec.get("band_structure")
+                    symmetry = mat.get("symmetry") or {}
+                    found = {
+                        "entry_id": entry.get("entry_id", ""),
+                        "material_id": mat.get("material_id", ""),
+                        "formula": mat.get("chemical_formula_hill") or formula,
+                        "space_group": (
+                            symmetry.get("space_group_symbol")
+                            if isinstance(symmetry, dict) else None
+                        ),
+                        "n_calculations": props.get("n_calculations"),
+                        "band_gap_data": bool(dos_bg) or bool(bs),
+                    }
+                    results["materials_found"].append(found)
+
+                    if want_band_gap and found["band_gap_data"]:
+                        results["match"] = True
+                        n_spin = len(dos_bg) if isinstance(dos_bg, list) else 0
+                        label = (
+                            f"{found['formula']} (NOMAD {str(found['entry_id'])[:12]}): "
+                            "band-gap data present"
+                        )
+                        if n_spin:
+                            label += f" ({n_spin} spin channel(s))"
+                        results["matching_entries"].append(label)
             except Exception:
                 continue
 
@@ -827,11 +1114,15 @@ class DiscoveryEngine:
             print(f"  [Discovery] Phase 4: Validating '{hyp.title[:60]}...'")
             validation = self.validator.validate(hyp)
             hyp.external_validation = validation
+            vs = validation.get("validation_source", "none")
             if validation.get("overall_match"):
-                hyp.validation_status = "validated"
+                hyp.validation_status = (
+                    "validated" if vs == "database" else "literature_supported"
+                )
                 report.validated_count += 1
-                report.materials_project_hits += 1
-            elif validation.get("databases_checked"):
+                if vs == "database":
+                    report.materials_project_hits += 1
+            elif validation.get("databases_checked") or validation.get("validation_notes"):
                 hyp.validation_status = "inconclusive"
             else:
                 hyp.validation_status = "pending"

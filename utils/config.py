@@ -44,6 +44,16 @@ _SCIVERSE_KEY = os.environ.get("SCIVERSE_API_KEY", "") or _load_api_key_file().g
 if _SCIVERSE_KEY:
     os.environ.setdefault("SCIVERSE_API_KEY", _SCIVERSE_KEY)
 
+# 加载 Materials Project key（外部数据库验证用）
+_MP_KEY = os.environ.get("MATERIALS_PROJECT_API_KEY", "") or _load_api_key_file().get("MATERIALS_PROJECT_API_KEY", "")
+if _MP_KEY:
+    os.environ.setdefault("MATERIALS_PROJECT_API_KEY", _MP_KEY)
+
+# 加载 MinerU key（可选：云端 PDF 解析，缺失时自动回退本地 MarkItDown）
+_MINERU_KEY = os.environ.get("MINERU_API_KEY", "") or _load_api_key_file().get("MINERU_API_KEY", "")
+if _MINERU_KEY:
+    os.environ.setdefault("MINERU_API_KEY", _MINERU_KEY)
+
 DEEPSEEK_API_KEY = _resolve_api_key()
 
 # DeepSeek V4 Flash

@@ -626,6 +626,152 @@ class ToolHandlers:
                     continue
         return None
 
+    def _load_evidence_source(self) -> Optional[str]:
+        """证据源 = 知识图谱/摘要 + 全文缓存（workspace/data/papers/*.md）。"""
+        from pathlib import Path as _Path
+        base = self._load_knowledge_source() or ""
+        parts = [base] if base.strip() else []
+        papers_dir = _Path("workspace/data/papers")
+        if papers_dir.exists():
+            total = sum(len(p) for p in parts)
+            for md in sorted(papers_dir.glob("*.md")):
+                try:
+                    txt = md.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if total + len(txt) > 300_000:
+                    parts.append(f"\n\n<!-- 全文缓存过多，已截断：{md.name} -->\n")
+                    break
+                parts.append(txt)
+                total += len(txt)
+        return "\n\n".join(parts) if parts else None
+
+    def h_get_full_text(self, args: dict) -> str:
+        """获取论文全文：Sciverse 全文片段 / PDF 下载解析 / 缓存摘要。"""
+        from pathlib import Path as _Path
+        import json as _json
+        import re as _re
+
+        paper_id = (args.get("paper_id") or "").strip()
+        if not paper_id:
+            return "❌ get_full_text 需要 paper_id 参数（如 p1、DOI 或标题关键词）。"
+
+        papers_dir = _Path("workspace/data/literature_cache")
+        results_file = papers_dir / "search_results.json"
+        papers_file = papers_dir / "papers.json"
+
+        meta = None
+        cached_text = None
+
+        # 1) papers.json：键即 paper_id
+        if papers_file.exists():
+            try:
+                papers = _json.loads(papers_file.read_text(encoding="utf-8"))
+                if isinstance(papers, dict) and paper_id in papers:
+                    cached_text = str(papers[paper_id])
+            except Exception:
+                pass
+
+        # 2) search_results.json：id / DOI / 标题匹配
+        if meta is None and results_file.exists():
+            try:
+                results = _json.loads(results_file.read_text(encoding="utf-8"))
+            except Exception:
+                results = []
+            pid_l = paper_id.lower()
+            for r in results:
+                rid = str(r.get("id", "")).lower()
+                doi = str(r.get("doi", "") or "").lower()
+                title = str(r.get("title", "") or "").lower()
+                if (rid == pid_l or (doi and (doi == pid_l or doi.endswith(pid_l)))
+                        or (len(pid_l) >= 4 and title and pid_l in title)):
+                    meta = r
+                    break
+        if meta is None:
+            for r in (self.survey_state.get("search_results") or []):
+                rid = str(r.get("id", "")).lower()
+                doi = str(r.get("doi", "") or "").lower()
+                title = str(r.get("title", "") or "").lower()
+                if (rid == paper_id.lower() or doi.lower() == paper_id.lower()
+                        or (len(paper_id) >= 4 and paper_id.lower() in title)):
+                    meta = r
+                    break
+
+        if meta is None and cached_text is None:
+            return (
+                "❌ 找不到该论文的元数据。请先 search_papers，"
+                "或检查 paper_id（p1/p2… 对应 papers.json 的键，或 DOI/标题关键词）。"
+            )
+
+        out_dir = _Path("workspace/data/papers")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        safe = _re.sub(r'[^\w\-.]+', '_', paper_id)[:80] or "paper"
+        md_path = out_dir / f"{safe}.md"
+
+        # 3) 全文缓存
+        if md_path.exists():
+            text = md_path.read_text(encoding="utf-8", errors="replace")
+            shown = text[:40000]
+            return (
+                f"✅ 命中全文缓存：{md_path}（{len(text)} 字符）\n\n{shown}"
+                + ("\n…[截断]" if len(text) > 40000 else "")
+            )
+
+        # 4) 获取全文
+        text = ""
+        source = "cached_text"
+        if meta:
+            doc_id = None
+            raw = meta.get("raw_metadata") or {}
+            if isinstance(raw, dict):
+                doc_id = raw.get("doc_id") or raw.get("id")
+            if meta.get("source") == "sciverse" or doc_id:
+                try:
+                    from literature_agent.search import SciverseSearcher
+                    searcher = SciverseSearcher(api_key=os.environ.get("SCIVERSE_API_KEY", ""))
+                    snippet = searcher.read_content(doc_id, offset=0, limit=16384) if doc_id else None
+                    if snippet:
+                        text = f"# {meta.get('title', paper_id)}\n\n## 全文片段（Sciverse）\n\n{snippet}"
+                        source = "sciverse_fulltext"
+                except Exception:
+                    pass
+            if not text and meta.get("pdf_url"):
+                try:
+                    import requests as _requests
+                    pdf_path = out_dir / f"{safe}.pdf"
+                    resp = _requests.get(
+                        meta["pdf_url"],
+                        headers={"User-Agent": "goai-pi-agent/1.0"},
+                        timeout=60,
+                    )
+                    if resp.status_code == 200 and resp.content[:4] == b"%PDF":
+                        pdf_path.write_bytes(resp.content)
+                        from literature_agent.parser import DocumentParser
+                        doc = DocumentParser().parse(str(pdf_path))
+                        text = doc.full_text or f"# {doc.title}\n\n{doc.abstract}"
+                        source = f"pdf:{doc.parse_engine}"
+                except Exception as e:
+                    self._print(f"  ⚠️ PDF 获取/解析失败: {e}")
+        if not text and cached_text:
+            text = f"# {paper_id}（缓存摘要）\n\n{cached_text}"
+            source = "cached_abstract"
+
+        if not text.strip():
+            return (
+                "❌ 未能获取全文。该论文可能没有可用的 pdf_url 或 Sciverse 全文；"
+                "可用来源：{0}".format(meta.get("source", "unknown") if meta else "papers.json 缓存")
+            )
+
+        md_path.write_text(text, encoding="utf-8")
+        self.survey_state.setdefault("parsed_papers", {})[paper_id] = {
+            "path": str(md_path), "source": source,
+        }
+        shown = text[:40000]
+        return (
+            f"✅ 全文已获取（{source}，{len(text)} 字符）→ {md_path}\n\n{shown}"
+            + ("\n…[截断，全文已存文件，可 read_file 查看]" if len(text) > 40000 else "")
+        )
+
     def _property_keywords(self, property_name: str) -> List[str]:
         """把假设性质名（中英混排）映射为文献检索关键词。"""
         kws: set = set()
@@ -797,10 +943,10 @@ class ToolHandlers:
 
         # ── 知识来源：优先 Agent 自写的知识图谱（Markdown），缺省回退论文摘要 ──
         kg_md = "workspace/outputs/literature_survey/knowledge_graph.md"
-        source_text = self._load_knowledge_source()
+        source_text = self._load_evidence_source()
         if not source_text:
             return (
-                "❌ 找不到知识来源（knowledge_graph.md / paper_summaries.md）。\n"
+                "❌ 找不到知识来源（knowledge_graph.md / paper_summaries.md / data/papers/*.md）。\n"
                 f"请先 extract_knowledge 整理论文摘要，再 write_file 自己的知识图谱 "
                 f"{kg_md}（材料/性质/数值/关系，Markdown 格式），然后重试。"
             )
@@ -820,7 +966,10 @@ class ToolHandlers:
             "search_method": method,
             "iterations": n_iterations,
             "evidence": {
-                "source": "knowledge_graph.md" if _Path(kg_md).exists() else "paper_summaries.md",
+                "source": (
+                    "knowledge_graph.md + paper_summaries.md + papers/*.md"
+                    if _Path(kg_md).exists() else "paper_summaries.md"
+                ),
                 "blocks": len(evid["blocks"]),
                 "material_tokens": len(evid["material_tokens"]),
                 "property_keywords": evid["prop_keywords"][:10],
@@ -908,9 +1057,12 @@ class ToolHandlers:
         result = validator.validate(hyp)
 
         # Update hypothesis with validation
+        vs = result.get("validation_source", "none")
         if result.get("overall_match"):
-            hyp.validation_status = "validated"
-        elif result.get("databases_checked"):
+            hyp.validation_status = (
+                "validated" if vs == "database" else "literature_supported"
+            )
+        elif result.get("databases_checked") or result.get("validation_notes"):
             hyp.validation_status = "inconclusive"
         else:
             hyp.validation_status = "pending"
@@ -926,6 +1078,7 @@ class ToolHandlers:
         self.survey_state["hypotheses"] = hypotheses_data
 
         evidence = result.get("supporting_evidence", [])
+        notes = result.get("validation_notes", [])
         return (
             f"{'✅' if result.get('overall_match') else '❓'} Validation for hypothesis #{idx}: '{hyp.title[:80]}'\n"
             f"   Status: {hyp.validation_status}\n"
@@ -933,6 +1086,7 @@ class ToolHandlers:
             f"   Materials Project hits: {result.get('details', {}).get('materials_project', {}).get('matching_entries', [])}\n"
             f"   Supporting evidence ({len(evidence)} entries):\n" +
             "\n".join(f"   - {e}" for e in evidence[:5]) +
+            (f"\n   Notes: " + "; ".join(notes) if notes else "") +
             f"\n\nNext: generate_discovery_report to produce the final Route A report."
         )
 
@@ -1023,6 +1177,22 @@ class ToolHandlers:
                 merged.append(item)
         cache_file.write_text(_json.dumps(merged, ensure_ascii=False, indent=2), encoding="utf-8")
 
+        # 记录本轮新增唯一论文数（供 assess_search_coverage 计算边际收益）
+        new_count = max(0, len(merged) - len(existing))
+        try:
+            from datetime import datetime as _dt
+            log_entry = {
+                "timestamp": _dt.now().isoformat(),
+                "query": query,
+                "result_count": len(results),
+                "new_unique": new_count,
+                "total_unique": len(merged),
+            }
+            with open(out_dir / "search_log.jsonl", "a", encoding="utf-8") as _lf:
+                _lf.write(_json.dumps(log_entry, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
         # Store in session state
         self.survey_state["search_results"] = merged
 
@@ -1039,6 +1209,153 @@ class ToolHandlers:
             summary_lines.append(f"\n... and {len(results)-10} more papers")
         summary_lines.append(f"\nResults saved to workspace/data/literature_cache/search_results.json")
         return "\n".join(summary_lines)
+
+    _COVERAGE_STOPWORDS = {
+        "the", "and", "for", "with", "from", "that", "this", "these", "those",
+        "are", "was", "were", "been", "have", "has", "had", "will", "would",
+        "can", "could", "should", "may", "might", "not", "but", "its", "their",
+        "our", "his", "her", "into", "onto", "upon", "using", "used", "based",
+        "such", "than", "then", "when", "where", "which", "while", "within",
+        "through", "between", "about", "after", "before", "during", "also",
+        "however", "although", "more", "most", "less", "least", "new", "novel",
+        "high", "low", "large", "small", "good", "better", "best", "doi", "vol",
+        "pp", "fig", "table", "et", "al", "de", "la", "le", "paper", "study",
+        "results", "result", "show", "shows", "shown", "found", "report",
+    }
+
+    def _coverage_tokens(self, text: str) -> List[str]:
+        toks = re.findall(r'[a-z][a-z0-9-]{2,}', (text or "").lower())
+        return [t for t in toks if t not in self._COVERAGE_STOPWORDS]
+
+    def h_assess_search_coverage(self, args: dict) -> str:
+        """检索覆盖审计：唯一论文 / 来源 / 年份 / 主题词覆盖 / 边际收益。"""
+        from pathlib import Path as _Path
+        import json as _json
+        from collections import Counter
+
+        cache_dir = _Path("workspace/data/literature_cache")
+        results_file = cache_dir / "search_results.json"
+        log_file = cache_dir / "search_log.jsonl"
+
+        results = []
+        if results_file.exists():
+            try:
+                results = _json.loads(results_file.read_text(encoding="utf-8"))
+            except Exception:
+                results = []
+        if not results:
+            results = self.survey_state.get("search_results") or []
+
+        # 去重（doi / 标题）
+        seen, unique = set(), []
+        for r in results:
+            key = ((r.get("doi") or "") or (r.get("title") or "")).strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                unique.append(r)
+
+        sources = Counter((r.get("source") or "unknown") for r in unique)
+        years = sorted(r.get("year") for r in unique if r.get("year"))
+
+        # 检索日志（含 new_unique 的条目用于边际收益）
+        queries = []
+        gains = []
+        if log_file.exists():
+            try:
+                for line in log_file.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    item = _json.loads(line)
+                    queries.append(item.get("query", ""))
+                    if "new_unique" in item:
+                        gains.append((
+                            item.get("query", ""),
+                            item.get("new_unique", 0),
+                            item.get("result_count", 0),
+                        ))
+            except Exception:
+                pass
+
+        # 主题词覆盖：论文高频词 vs 已检索词
+        all_terms = Counter()
+        for r in unique:
+            all_terms.update(self._coverage_tokens(f"{r.get('title', '')} {r.get('abstract') or ''}"))
+        query_terms = set()
+        for q in queries:
+            query_terms.update(self._coverage_tokens(q))
+        suggested = [
+            t for t, c in all_terms.most_common(300)
+            if t not in query_terms and c >= 2
+        ][:10]
+
+        recent_gains = gains[-5:] if gains else []
+        if recent_gains:
+            last_new = recent_gains[-1][1]
+            avg_new = sum(g[1] for g in recent_gains) / len(recent_gains)
+        else:
+            last_new = None
+            avg_new = None
+
+        total_returned = sum(g[2] for g in gains) or len(results) or 1
+        capture_efficiency = len(unique) / total_returned
+
+        if not queries:
+            decision = "先执行至少 1 轮检索（search_papers），再回来评估覆盖。"
+        elif last_new is not None and last_new <= 3 and len(unique) >= 15:
+            decision = (
+                "🔴 最近一轮新增唯一论文过少（≤3），且已累计 ≥15 篇"
+                " → 建议停止检索，进入知识整理/Gap 分析。"
+            )
+        elif capture_efficiency < 0.15 and len(unique) >= 10:
+            decision = (
+                "🟠 捕获效率偏低（<15%）→ 建议调整检索词角度"
+                "（换同义词/子主题/年份范围），再评估。"
+            )
+        else:
+            decision = (
+                "🟢 覆盖仍在增长 → 建议继续从不同角度检索 1-2 轮，然后重新评估。"
+            )
+
+        report = {
+            "unique_papers": len(unique),
+            "sources": dict(sources),
+            "year_min": years[0] if years else None,
+            "year_max": years[-1] if years else None,
+            "search_rounds": len(queries),
+            "recent_gains": [
+                {"query": q, "new_unique": n, "result_count": c}
+                for q, n, c in recent_gains
+            ],
+            "capture_efficiency": round(capture_efficiency, 3),
+            "suggested_queries": suggested,
+            "decision": decision,
+        }
+        report_path = cache_dir / "coverage_report.json"
+        try:
+            report_path.write_text(_json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+        self.survey_state["coverage_report"] = report
+
+        lines = [
+            "✅ 检索覆盖审计完成",
+            f"   唯一论文：{len(unique)}",
+            f"   来源分布：{', '.join(f'{k}({v})' for k, v in sources.items()) or '无'}",
+            f"   年份范围：{years[0] if years else '?'} – {years[-1] if years else '?'}",
+            f"   检索轮次：{len(queries)}",
+        ]
+        if recent_gains:
+            lines.append(
+                "   最近 5 轮新增唯一论文："
+                + ", ".join(f"'{q[:20]}': +{n}" for q, n, c in recent_gains)
+            )
+        lines.append(f"   捕获效率：{capture_efficiency:.0%}（唯一论文 / 总返回）")
+        if suggested:
+            lines.append(f"   建议补充检索词：{'、'.join(suggested)}")
+        lines.append(f"   📋 {decision}")
+        lines.append("   报告已存：" + str(report_path))
+        return "\n".join(lines)
 
     def h_parse_paper(self, args: dict) -> str:
         """解析单篇论文。"""
@@ -1233,6 +1550,91 @@ class ToolHandlers:
             f"  - 全部使用中文撰写\n"
         )
 
+    def h_audit_knowledge_graph(self, args: dict) -> str:
+        """审计 Agent 手写的 Markdown 知识图谱：数值冲突 / 实体重复 / 溯源缺失。"""
+        from literature_agent.extractor import audit_markdown_kg
+        from pathlib import Path as _Path
+        import json as _json
+
+        source_text = self._load_knowledge_source()
+        if not source_text:
+            return (
+                "❌ 找不到知识来源（knowledge_graph.md / paper_summaries.md）。\n"
+                "请先 write_file 自己的知识图谱 "
+                "workspace/outputs/literature_survey/knowledge_graph.md，然后重试。"
+            )
+
+        audit = audit_markdown_kg(source_text)
+        out_dir = _Path("workspace/outputs/literature_survey")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # JSON
+        json_path = out_dir / "knowledge_graph_audit.json"
+        json_path.write_text(_json.dumps(audit, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        # Markdown
+        st = audit["stats"]
+        md_lines = [
+            "# 知识图谱审计报告",
+            "",
+            f"**材料**：{st['materials']} | **性质记录**：{st['property_records']} | "
+            f"**数值冲突**：{st['conflicts']} | **实体重复**：{st['duplicates']} | "
+            f"**溯源缺失**：{st['no_provenance']}",
+            "",
+            "## 1. 数值冲突（→ 矛盾型 Research Gap 候选）",
+            "",
+        ]
+        if audit["conflicts"]:
+            for i, c in enumerate(audit["conflicts"], 1):
+                md_lines.append(f"### {i}. {c['material']} / {c['property']}（{c['unit']}）")
+                md_lines.append(f"- 最小值：{c['values'][0]}（来源 {c['min_paper'] or '未知'}）")
+                md_lines.append(f"- 最大值：{c['values'][-1]}（来源 {c['max_paper'] or '未知'}）")
+                md_lines.append("")
+        else:
+            md_lines.append("- 未发现显著数值冲突")
+            md_lines.append("")
+        md_lines += ["## 2. 实体重复", ""]
+        if audit["duplicates"]:
+            for d in audit["duplicates"]:
+                md_lines.append(f"- {' / '.join(d['names'])} → 建议统一为一种写法")
+        else:
+            md_lines.append("- 未发现重复写法")
+        md_lines += ["", "## 3. 溯源缺失（数值无论文 ID）", ""]
+        if audit["no_provenance_records"]:
+            for r in audit["no_provenance_records"][:20]:
+                md_lines.append(f"- {r['material']} / {r['property']} = {r['value']} {r['unit']}")
+        else:
+            md_lines.append("- 全部数值均有论文 ID 支撑")
+        md_lines.append("")
+        md_path = out_dir / "knowledge_graph_audit.md"
+        md_path.write_text("\n".join(md_lines), encoding="utf-8")
+
+        self.survey_state["knowledge_audit"] = audit
+        self.survey_state["knowledge_audit_path"] = str(md_path)
+
+        lines = [
+            "✅ 知识图谱审计完成",
+            f"   材料 {st['materials']} | 性质记录 {st['property_records']} | "
+            f"冲突 {st['conflicts']} | 重复 {st['duplicates']} | 溯源缺失 {st['no_provenance']}",
+            f"   审计报告：{md_path}",
+        ]
+        if audit["conflicts"]:
+            lines.append("   ⚠️ 矛盾型 Gap 候选（数值冲突）：")
+            for c in audit["conflicts"][:5]:
+                lines.append(
+                    f"   - {c['material']} / {c['property']}: "
+                    f"{c['values'][0]} vs {c['values'][-1]} {c['unit']}"
+                )
+        if audit["duplicates"]:
+            lines.append("   🔁 重复写法：")
+            for d in audit["duplicates"][:5]:
+                lines.append(f"   - {' / '.join(d['names'])}")
+        lines.append(
+            "   下一步：read_file 审计报告 → 修正知识图谱（统一写法/补论文 ID）→ "
+            "将数值冲突写入 gap_report.md 作为矛盾型 Gap"
+        )
+        return "\n".join(lines)
+
     def h_generate_report(self, args: dict) -> str:
         """指示主 Agent 自己撰写最终调研报告。
 
@@ -1294,9 +1696,12 @@ def build_tool_manager(task_type: str, bench: str, memory_dir: Path,
     manager.register("stop", handlers.h_stop)
     # Literature survey tools
     manager.register("search_papers", handlers.h_search_papers)
+    manager.register("assess_search_coverage", handlers.h_assess_search_coverage)
     manager.register("parse_paper", handlers.h_parse_paper)
+    manager.register("get_full_text", handlers.h_get_full_text)
     manager.register("extract_knowledge", handlers.h_extract_knowledge)
     manager.register("analyze_gaps", handlers.h_analyze_gaps)
+    manager.register("audit_knowledge_graph", handlers.h_audit_knowledge_graph)
     manager.register("generate_report", handlers.h_generate_report)
     # Route A: Discovery tools
     manager.register("generate_hypotheses", handlers.h_generate_hypotheses)

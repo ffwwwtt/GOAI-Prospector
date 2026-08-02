@@ -279,6 +279,18 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "assess_search_coverage",
+            "description": "检索覆盖审计（确定性计算）：统计唯一论文数、来源分布、年份范围、检索轮次、最近每轮新增唯一论文数（边际收益）、捕获效率，并对比论文高频主题词与已用检索词，给出建议补充检索词和『继续检索/停止检索』决策。每 2-3 轮检索后、Gap 分析前应调用一次。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "parse_paper",
             "description": "Parse a PDF/DOCX/HTML paper into structured Markdown text. Extracts sections, references, and identifies materials/properties/methods mentioned. Use this on individual papers you want to analyze deeply.",
             "parameters": {
@@ -290,6 +302,23 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["filepath"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_full_text",
+            "description": "获取论文全文用于深度阅读：按 paper_id（p1/p2…、DOI 或标题关键词）从检索缓存定位论文，依次尝试 Sciverse 全文片段、PDF 下载解析（MarkItDown）、缓存摘要。全文缓存到 workspace/data/papers/ 并被 run_discovery_search 的证据索引使用。读完摘要后，对 3-5 篇关键论文调用本工具提取精确数值/条件/方法，回填知识图谱。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "paper_id": {
+                        "type": "string",
+                        "description": "论文标识：p1/p2…（papers.json 的键）、DOI，或标题关键词（至少 4 字符）"
+                    }
+                },
+                "required": ["paper_id"]
             }
         }
     },
@@ -319,6 +348,18 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "analyze_gaps",
             "description": "检查论文摘要（paper_summaries.md）是否就绪并返回 Gap 分析指引。真正的 Gap 识别（矛盾结论/缺失连接/未探索空间）由 Agent 阅读摘要后完成，并 write_file 输出 gap_report.md。",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "audit_knowledge_graph",
+            "description": "审计 Agent 手写的 Markdown 知识图谱（knowledge_graph.md）：自动检测同一材料同一性质的数值冲突（→矛盾型 Gap 候选）、材料名称重复写法、缺失论文 ID 的数值。输出审计报告到 workspace/outputs/literature_survey/knowledge_graph_audit.md。写完知识图谱后、做 Gap 分析前应调用一次。",
             "parameters": {
                 "type": "object",
                 "properties": {},

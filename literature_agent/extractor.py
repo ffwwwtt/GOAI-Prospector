@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -174,3 +175,205 @@ class KnowledgeFusion:
 
         merged.papers_processed = list(set(kg1.papers_processed + kg2.papers_processed))
         return merged
+
+
+# ═══════════════════════════════════════════════════════════════
+# Markdown 知识图谱审计 — Agent 手写知识图谱（Markdown）的结构化体检
+# ═══════════════════════════════════════════════════════════════
+
+# 非材料的气体/分子（避免把 CO2、H2O 等吸附质误当材料）
+_NON_MATERIALS = {
+    "co2", "h2", "n2", "o2", "ch4", "so2", "no2", "nh3", "n2o", "h2s",
+    "co", "no", "h2o", "ch3oh", "c2h5oh", "ch3nh2",
+}
+
+_MATERIAL_RE = re.compile(
+    r'\b(?:'
+    r'[A-Z][a-z]?\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|'   # 化学式 Fe2O3 / MgO / MAPbI3
+    r'[A-Z][a-z]?-(?:MOF|ZIF|MIL|UiO|HKUST|IRMOF|COF)-\d+|'  # Mg-MOF-74
+    r'ZIF-\d+|UiO-\d+|MIL-\d+|HKUST-\d+|IRMOF-\d+|MOF-\d+|COF-\d+|'
+    r'CsPb[A-Za-z0-9]+|FAPbI\d+|MAPbI\d+|MA[A-Za-z0-9]+|FA[A-Za-z0-9]+'
+    r')\b'
+)
+
+_VALUE_RE = re.compile(
+    r'(\d+(?:\.\d+)?)\s*'
+    r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|kj/mol|wt%|m2/g|m²/g|bar|K|°C|℃|%|h|min|eV|meV)',
+    re.IGNORECASE,
+)
+
+_PAPER_ID_RE = re.compile(r'\b(p\d+|doi[:/]\S+|arXiv[:/]\S+)\b', re.IGNORECASE)
+
+# 性质关键词 → 规范性质键
+_PROPERTY_KEYWORDS: Dict[str, List[str]] = {
+    "capacity": ["capacity", "uptake", "loading", "吸附容量", "吸附量", "容量"],
+    "selectivity": ["selectivity", "separation factor", "选择性", "分离因子", "分离比"],
+    "heat": ["isosteric heat", "qst", "enthalpy", "吸附热", "等量吸附热", "焓"],
+    "surface_area": ["surface area", "bet", "比表面积", "表面积"],
+    "stability": ["stability", "cyclability", "循环稳定性", "稳定性", "再生性能"],
+    "band_gap": ["band gap", "bandgap", "带隙", "能隙"],
+    "formation_energy": ["formation energy", "生成能", "形成能"],
+    "efficiency": ["efficiency", "pce", "效率"],
+    "conductivity": ["conductivity", "电导率"],
+    "diffusion": ["diffusion", "kinetics", "扩散系数", "扩散"],
+    "temperature": ["temperature", "温度"],
+    "pressure": ["pressure", "压力"],
+}
+
+
+def _norm_material(name: str) -> str:
+    """材料名归一化：小写 + 去除非字母数字。"""
+    return "".join(ch for ch in str(name).lower() if ch.isalnum())
+
+
+def audit_markdown_kg(text: str) -> Dict[str, Any]:
+    """审计 Agent 手写的 Markdown 知识图谱。
+
+    从自然语言/表格文本中抽取（材料, 性质, 数值, 单位, 论文ID）记录，
+    并检测三类问题：
+      - 数值冲突：同一材料同一性质、不同论文报告差异显著的数值
+      - 实体重复：同一材料的不同写法
+      - 溯源缺失：有数值但没有论文 ID 支撑
+
+    Returns:
+        {
+            "stats": {...},
+            "materials": [...],
+            "properties": [...],
+            "conflicts": [...],
+            "duplicates": [...],
+            "no_provenance_records": [...],
+            "records": [...],
+        }
+    """
+    blocks = [b.strip() for b in re.split(r'\n(?=#{1,3} )', text or "") if len(b.strip()) > 40]
+    if not blocks:
+        blocks = [text or ""]
+
+    materials_seen: Dict[str, str] = {}       # norm → display name
+    records: List[Dict[str, Any]] = []
+
+    for block in blocks:
+        current_materials: List[str] = []
+
+        def _collect_materials(segment: str) -> List[str]:
+            """从文本段中收集材料名并登记。"""
+            found = []
+            for m in re.findall(_MATERIAL_RE, segment):
+                mn = _norm_material(m)
+                if mn in _NON_MATERIALS or len(mn) < 2:
+                    continue
+                found.append(m)
+                if mn not in materials_seen:
+                    materials_seen[mn] = m
+            return list(dict.fromkeys(found))
+
+        for raw_line in block.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            # 标题行 → 更新当前材料
+            if line.startswith("#"):
+                mats = _collect_materials(line)
+                if mats:
+                    current_materials = mats
+                continue
+
+            # 非列表/表格行（叙述句）也参与，但列表/表格行优先
+            inline_mats = _collect_materials(line)
+            mats = inline_mats or current_materials
+            if not mats:
+                continue
+
+            lower = line.lower()
+            line_papers = sorted(set(p.lower() for p in re.findall(_PAPER_ID_RE, line)))
+            line_values = []
+            for vm in _VALUE_RE.finditer(lower):
+                v = abs(float(vm.group(1)))
+                if 0 < v < 1e6:
+                    line_values.append((v, (vm.group(2) or "").lower()))
+
+            for prop_key, kws in _PROPERTY_KEYWORDS.items():
+                if not any(kw.lower() in lower for kw in kws):
+                    continue
+                if not line_values:
+                    # 性质提到但该行无数值：仍记录（用于溯源审计）
+                    for mat in mats:
+                        records.append({
+                            "material": mat,
+                            "material_norm": _norm_material(mat),
+                            "property": prop_key,
+                            "value": None,
+                            "unit": "",
+                            "papers": line_papers,
+                        })
+                    continue
+                for mat in mats:
+                    for v, unit in line_values:
+                        records.append({
+                            "material": mat,
+                            "material_norm": _norm_material(mat),
+                            "property": prop_key,
+                            "value": v,
+                            "unit": unit,
+                            "papers": line_papers,
+                        })
+
+    # ── 冲突检测：同 (材料, 性质, 单位) 数值差异 > 1.5 倍 ──
+    groups: Dict[Tuple, List[Dict]] = {}
+    for r in records:
+        if r["value"] is None:
+            continue
+        key = (r["material_norm"], r["property"], r["unit"])
+        groups.setdefault(key, []).append(r)
+
+    conflicts = []
+    for (mn, prop, unit), group in groups.items():
+        vals = sorted(rec["value"] for rec in group)
+        if len(vals) < 2 or vals[0] <= 0:
+            continue
+        if vals[-1] / vals[0] > 1.5:
+            min_rec = min(group, key=lambda r: r["value"])
+            max_rec = max(group, key=lambda r: r["value"])
+            conflicts.append({
+                "material": materials_seen.get(mn, mn),
+                "property": prop,
+                "unit": unit,
+                "values": vals,
+                "min_paper": min_rec["papers"],
+                "max_paper": max_rec["papers"],
+            })
+
+    # ── 实体重复：归一化后相同但写法不同 ──
+    by_norm: Dict[str, set] = {}
+    for mn, display in materials_seen.items():
+        by_norm.setdefault(mn, set()).add(display)
+    duplicates = [
+        {"norm": mn, "names": sorted(names)}
+        for mn, names in by_norm.items() if len(names) > 1
+    ]
+
+    # ── 溯源缺失：有数值无论文 ID ──
+    no_provenance = [
+        {k: r[k] for k in ("material", "property", "value", "unit")}
+        for r in records if r["value"] is not None and not r["papers"]
+    ]
+
+    return {
+        "stats": {
+            "materials": len(materials_seen),
+            "property_records": len(records),
+            "conflicts": len(conflicts),
+            "duplicates": len(duplicates),
+            "no_provenance": len(no_provenance),
+        },
+        "materials": sorted(materials_seen.values()),
+        "properties": sorted(
+            {r["property"] for r in records if r["value"] is not None}
+        ),
+        "conflicts": conflicts,
+        "duplicates": duplicates,
+        "no_provenance_records": no_provenance[:50],
+        "records": records[:500],
+    }
