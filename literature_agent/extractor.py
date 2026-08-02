@@ -192,6 +192,7 @@ _MATERIAL_RE = re.compile(
     r'[A-Z][a-z]?\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|'   # 化学式 Fe2O3 / MgO / MAPbI3
     r'[A-Z][a-z]?-(?:MOF|ZIF|MIL|UiO|HKUST|IRMOF|COF)-\d+|'  # Mg-MOF-74
     r'ZIF-\d+|UiO-\d+|MIL-\d+|HKUST-\d+|IRMOF-\d+|MOF-\d+|COF-\d+|'
+    r'(?:PVDF|PMMA|PEO|PEI|PVA|PEDOT|PANI|PPy|PLA|PCL|PTFE|PAN|PET|P3HT|PSS|PBTTT|PVC|PEEK|PI|PP|PE|PS|PC)\b|'  # 常见聚合物缩写
     r'CsPb[A-Za-z0-9]+|FAPbI\d+|MAPbI\d+|MA[A-Za-z0-9]+|FA[A-Za-z0-9]+'
     r')\b'
 )
@@ -199,7 +200,7 @@ _MATERIAL_RE = re.compile(
 _VALUE_RE = re.compile(
     r'(\d+(?:\.\d+)?)\s*'
     r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|kj/mol|wt%|m2/g|m²/g|bar|K|°C|℃|%|h|min|eV|meV|'
-    r'W/mK|S/cm|GPa|MPa|g/cm3|cm3/g|mol/m3|vol%|at%|Å|nm)',
+    r'W/mK|mW/mK|S/cm|mS/cm|uS/cm|μS/cm|GPa|MPa|g/cm3|cm3/g|mol/m3|vol%|at%|Å|nm|mm|μm|µm|mbar|mV)',
     re.IGNORECASE,
 )
 

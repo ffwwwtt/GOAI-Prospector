@@ -833,7 +833,8 @@ class MaterialsProjectValidator:
                 for vm in re.finditer(
                     r'(\d+(?:\.\d+)?)\s*'
                     r'(mmol/g|mol/kg|mmol/cm3|cm3/g|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV|'
-                    r'W/mK|S/cm|GPa|MPa|g/cm3|mol/m3|vol%|at%|Å|nm)',
+                    r'W/mK|mW/mK|S/cm|mS/cm|uS/cm|μS/cm|GPa|MPa|g/cm3|mol/m3|vol%|at%|'
+                    r'Å|nm|mm|μm|µm|mbar|mV|°C|℃)',
                     bl, re.IGNORECASE,
                 ):
                     v = abs(float(vm.group(1)))
@@ -1311,7 +1312,7 @@ class NoveltyChecker:
 _SAMPLE_UNIT_RE = re.compile(
     r'(\d+(?:\.\d+)?)\s*'
     r'(mmol/g|mol/kg|mmol/cm3|mg/g|m2/g|cm3/g|kJ/mol|eV|meV|%|W/mK|S/cm|g/cm3|'
-    r'K|°C|℃|bar|Å|nm|h|min)',
+    r'K|°C|℃|bar|Å|nm|h|min|mW/mK|mS/cm|uS/cm|μS/cm|mm|μm|µm|mbar|mV)',
     re.IGNORECASE,
 )
 

@@ -759,7 +759,8 @@ class ToolHandlers:
     _VALUE_UNIT_RE = re.compile(
         r'(\d+(?:\.\d+)?)\s*'
         r'(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|wt%|m2/g|bar|K|%|h|min|eV|'
-        r'W/mK|S/cm|GPa|MPa|g/cm3|cm3/g|meV|mol/m3|vol%|at%|Å|nm)',
+        r'W/mK|mW/mK|S/cm|mS/cm|uS/cm|μS/cm|GPa|MPa|g/cm3|cm3/g|meV|mol/m3|'
+        r'vol%|at%|Å|nm|mm|μm|µm|mbar|mV|°C|℃)',
         re.IGNORECASE,
     )
 
@@ -1014,9 +1015,9 @@ class ToolHandlers:
          ("焓", "qst", "enthalpy", "等量吸附热", "吸附热")),
         (("m2/g",),
          ("bet", "surface area", "比表面积", "表面积")),
-        (("w/mk",),
+        (("w/mk", "mw/mk"),
          ("导热", "thermal conductivity", "热导率")),
-        (("s/cm",),
+        (("s/cm", "ms/cm", "us/cm", "μs/cm"),
          ("电导", "conductivity", "离子电导")),
         (("gpa", "mpa"),
          ("模量", "modulus", "硬度", "hardness", "强度", "strength")),
@@ -1056,7 +1057,9 @@ class ToolHandlers:
         # 补充文献中的材料名（化学式/MOF 家族），严格正则避免误匹配普通英文词
         material_tokens.update(
             m.lower() for m in re.findall(
-                r'\b(?:[A-Z][a-z]?\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|ZIF-\d+|UiO-\d+|MIL-\d+|HKUST-\d+|IRMOF-\d+|MOF-\d+)\b',
+                r'\b(?:[A-Z][a-z]?\d+[A-Za-z0-9]*(?:-[A-Za-z0-9]+)*|'
+                r'ZIF-\d+|UiO-\d+|MIL-\d+|HKUST-\d+|IRMOF-\d+|MOF-\d+|'
+                r'PVDF|PMMA|PEO|PEI|PVA|PEDOT|PANI|PPy|PLA|PCL|PTFE|PAN|PET|P3HT|PSS|PBTTT|PVC|PEEK|PI|PP|PE|PS|PC)\b',
                 source_text,
             )
         )
