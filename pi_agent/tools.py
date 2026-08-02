@@ -1101,8 +1101,25 @@ class ToolHandlers:
             f"Next: validate_discovery(hypothesis_index={idx}) to cross-validate against external databases."
         )
 
+    def _apply_validation(self, hyp) -> tuple:
+        """对单条假设执行双轨验证，更新状态，返回 (hyp, result)。"""
+        from literature_agent.discovery import MaterialsProjectValidator
+        validator = MaterialsProjectValidator()
+        result = validator.validate(hyp)
+        vs = result.get("validation_source", "none")
+        if result.get("overall_match"):
+            hyp.validation_status = (
+                "validated" if vs == "database" else "literature_supported"
+            )
+        elif result.get("databases_checked") or result.get("validation_notes"):
+            hyp.validation_status = "inconclusive"
+        else:
+            hyp.validation_status = "pending"
+        hyp.external_validation = result
+        return hyp, result
+
     def h_validate_discovery(self, args: dict) -> str:
-        """对假设进行外部数据库交叉验证。"""
+        """对假设进行外部数据库/文献证据链交叉验证（统一走本工具）。"""
         from literature_agent.discovery import DiscoveryEngine, MaterialsProjectValidator
         from literature_agent.discovery import DiscoveryHypothesis
         from pathlib import Path as _Path
@@ -1117,29 +1134,48 @@ class ToolHandlers:
             else:
                 return "❌ No hypotheses found."
 
-        if idx >= len(hypotheses_data):
-            return f"❌ Invalid hypothesis_index: {idx}"
+        out_dir = _Path("workspace/outputs/literature_survey/discovery")
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        # ── 批量验证（hypothesis_index="all" 或缺省）──
+        if str(idx).lower() in ("all", ""):
+            summary = ["✅ 批量验证完成（validate_discovery all）：", ""]
+            for i, hd in enumerate(hypotheses_data):
+                hyp = self._safe_hypothesis(hd)
+                hyp, result = self._apply_validation(hyp)
+                hypotheses_data[i] = asdict(hyp)
+                status_icon = {
+                    "validated": "✅", "literature_supported": "📚",
+                    "inconclusive": "❓", "pending": "⏳",
+                }.get(hyp.validation_status, "❓")
+                summary.append(
+                    f"   {status_icon} hyp[{i}] → {hyp.validation_status}"
+                    f"（conf={hyp.confidence:.2f}）{hyp.title[:50]}"
+                )
+            (out_dir / "hypotheses.json").write_text(
+                _json.dumps(hypotheses_data, ensure_ascii=False, indent=2)
+            )
+            self.survey_state["hypotheses"] = hypotheses_data
+            summary.append(
+                "\n全部假设的 validation_status / external_validation 已写入 "
+                "hypotheses.json（可审计验证记录）。\n"
+                "Next: generate_discovery_report 汇总最新验证结果。"
+            )
+            return "\n".join(summary)
+
+        # ── 单条验证 ──
+        if isinstance(idx, int) and 0 <= idx < len(hypotheses_data) or (
+            str(idx).isdigit() and 0 <= int(idx) < len(hypotheses_data)
+        ):
+            idx = int(idx)
+        else:
+            return f"❌ Invalid hypothesis_index: {idx}（可用 0-{len(hypotheses_data)-1} 或 'all'）"
 
         hyp = self._safe_hypothesis(hypotheses_data[idx])
-        validator = MaterialsProjectValidator()
-        result = validator.validate(hyp)
-
-        # Update hypothesis with validation
-        vs = result.get("validation_source", "none")
-        if result.get("overall_match"):
-            hyp.validation_status = (
-                "validated" if vs == "database" else "literature_supported"
-            )
-        elif result.get("databases_checked") or result.get("validation_notes"):
-            hyp.validation_status = "inconclusive"
-        else:
-            hyp.validation_status = "pending"
-        hyp.external_validation = result
+        hyp, result = self._apply_validation(hyp)
 
         # Save updated hypothesis
         hypotheses_data[idx] = asdict(hyp)
-        out_dir = _Path("workspace/outputs/literature_survey/discovery")
-        out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / "hypotheses.json").write_text(
             _json.dumps(hypotheses_data, ensure_ascii=False, indent=2)
         )

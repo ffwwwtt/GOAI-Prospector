@@ -610,16 +610,21 @@ class MaterialsProjectValidator:
     # ── 文献证据链验证（有机/框架材料的补充验证通道）──
 
     _LIT_PROPERTY_KWS = {
-        "band gap": ["band gap", "bandgap", "带隙", "能隙"],
+        "band gap": ["band gap", "bandgap", "带隙", "能隙", "禁带"],
         "formation energy": ["formation energy", "formation enthalpy", "生成能", "形成能"],
-        "capacity": ["capacity", "uptake", "loading", "吸附容量", "吸附量"],
-        "selectivity": ["selectivity", "separation factor", "选择性", "分离因子"],
-        "heat": ["isosteric heat", "qst", "enthalpy", "吸附热", "焓"],
-        "stability": ["stability", "cyclability", "循环稳定性", "稳定性"],
-        "efficiency": ["efficiency", "pce", "效率"],
-        "surface area": ["surface area", "bet", "比表面积"],
+        "capacity": [
+            "capacity", "uptake", "loading", "吸附容量", "吸附量",
+            "容量", "工作容量", "co2容量", "co2 容量",
+        ],
+        "selectivity": ["selectivity", "separation factor", "选择性", "分离因子", "分离选择性"],
+        "heat": ["isosteric heat", "qst", "enthalpy", "吸附热", "等量吸附热", "吸附焓", "焓"],
+        "stability": ["stability", "cyclability", "循环稳定性", "稳定性", "水稳定性", "湿稳定性", "循环"],
+        "efficiency": ["efficiency", "pce", "效率", "再生能耗", "能耗"],
+        "surface area": ["surface area", "bet", "比表面积", "表面积"],
         "conductivity": ["conductivity", "电导率"],
-        "diffusion": ["diffusion", "kinetics", "扩散"],
+        "diffusion": ["diffusion", "kinetics", "扩散", "扩散系数"],
+        "pressure": ["pressure", "压力", "压强"],
+        "temperature": ["temperature", "温度"],
     }
 
     _ORGANIC_MARKERS = (
@@ -731,10 +736,17 @@ class MaterialsProjectValidator:
         target = (hypothesis.property or "").lower()
         kws: List[str] = []
         for key, aliases in self._LIT_PROPERTY_KWS.items():
-            if key in target or target in key:
+            # 别名出现在目标属性名中即启用该组关键词（兼容中文复合短语）
+            if any(alias in target for alias in aliases):
                 kws.extend(aliases)
         if not kws:
             kws = [t for t in re.split(r'[\s/]+', target) if len(t) >= 3][:3]
+        kws = list(dict.fromkeys(kws))
+        kws_nospace = [
+            re.sub(r"\s+", "", kw)
+            for kw in kws
+            if len(re.sub(r"\s+", "", kw)) >= 3
+        ]
         if not kws:
             return None
 
@@ -752,12 +764,17 @@ class MaterialsProjectValidator:
         blocks = [b for b in re.split(r'\n(?=#{1,3} )', source_text) if len(b.strip()) > 40]
         if not blocks:
             blocks = [source_text]
+        hyp_materials = [m for m in hypothesis.materials[:5] if m]
+
         for block in blocks:
+            lines = block.splitlines()
+            block_lower = block.lower()
+
             # 标题行 → 该块的材料上下文 + 论文 ID
             heading_mats = []
             heading_papers: set = set()
             heading_text = ""
-            for line in block.splitlines():
+            for line in lines:
                 s = line.strip()
                 if s.startswith("#"):
                     sl = s.lower()
@@ -767,27 +784,43 @@ class MaterialsProjectValidator:
                     )
                     heading_text += " " + s
             if not heading_mats:
-                # 宽松匹配：元素+家族签名（如 Ni_xCo_y-MOF-74 ↔ Ni/Co-MOF-74）
                 heading_sig = self._material_signature(heading_text)
-                for hm in hypothesis.materials[:5]:
+                for hm in hyp_materials:
                     if self._sig_match(self._material_signature(hm), heading_sig):
                         heading_mats.append(hm)
                         break
-            if not heading_mats:
+
+            # 属性上下文：块内任意位置出现属性关键词即算（表头/正文均可，兼容空格差异）
+            block_has_prop = any(kw in block_lower for kw in kws)
+            if not block_has_prop and kws_nospace:
+                block_lower_ns = re.sub(r"\s+", "", block_lower)
+                block_has_prop = any(kn in block_lower_ns for kn in kws_nospace)
+            if not block_has_prop:
                 continue
-            for line in block.splitlines():
+
+            for line in lines:
                 s = line.strip()
                 if not s or s.startswith("#"):
                     continue
                 bl = s.lower()
-                if not any(kw in bl for kw in kws):
+                # 材料：行内子串 → 行内元素/家族签名 → 标题上下文
+                line_mats = [mt for mt in mats if mt in bl]
+                if not line_mats:
+                    line_sig = self._material_signature(s)
+                    for hm in hyp_materials:
+                        if self._sig_match(self._material_signature(hm), line_sig):
+                            line_mats = [hm]
+                            break
+                if not line_mats and heading_mats:
+                    line_mats = heading_mats
+                if not line_mats:
                     continue
                 papers.update(
                     p.lower() for p in re.findall(r'\b(p\d+|doi[:/]\S+|arXiv[:/]\S+)\b', bl)
                 )
                 papers.update(heading_papers)
                 for vm in re.finditer(
-                    r'(\d+(?:\.\d+)?)\s*(mmol/g|mol/kg|mmol/cm3|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV)',
+                    r'(\d+(?:\.\d+)?)\s*(mmol/g|mol/kg|mmol/cm3|cm3/g|mg/g|kJ/mol|m2/g|bar|K|%|eV|meV)',
                     bl, re.IGNORECASE,
                 ):
                     v = abs(float(vm.group(1)))

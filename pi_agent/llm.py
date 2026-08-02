@@ -412,16 +412,16 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "validate_discovery",
-            "description": "Cross-validate discovered structure-property relationships against Materials Project, OQMD, and NOMAD databases. Returns matching entries and validation status. Use this after run_discovery_search.",
+            "description": "对假设执行双轨交叉验证（**所有假设必须通过本工具验证，禁止用 run_shell 脚本自行复制验证逻辑**）：无机材料走 Materials Project/OQMD/NOMAD 数据库；有机/框架材料走文献证据链（知识图谱中 ≥2 篇独立论文即 literature_supported）。结果写入 hypotheses.json（validation_status + external_validation + 证据链），构成可审计的验证记录。hypothesis_index 传 'all' 或缺省 = 批量验证全部假设（推荐）。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "hypothesis_index": {
-                        "type": "integer",
-                        "description": "Which hypothesis to validate (0-indexed)"
+                        "type": "string",
+                        "description": "要验证的假设编号（0 开始），或 'all' 批量验证全部假设（推荐）"
                     }
                 },
-                "required": ["hypothesis_index"]
+                "required": []
             }
         }
     },
