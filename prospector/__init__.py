@@ -1,5 +1,5 @@
 """
-Pi-Agent: 自主文献调研 Agent
+Prospector: 自主文献调研 Agent
 
 架构层次：
   Layer 1: llm.py       — DeepSeek API 调用 + 工具定义
@@ -8,6 +8,6 @@ Pi-Agent: 自主文献调研 Agent
   Layer 4: tools.py     — 工具管线（读写文件、启停 Shell、监控进程）
 """
 
-from pi_agent.agent import PiAgent
+from prospector.agent import Prospector
 
-__all__ = ["PiAgent"]
+__all__ = ["Prospector"]

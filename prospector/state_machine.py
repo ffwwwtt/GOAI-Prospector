@@ -1,5 +1,5 @@
 """
-状态机 — Pi-Agent Layer 2
+状态机 — Prospector Layer 2
 ==========================
 Agent 生命周期状态及合法转移：
 

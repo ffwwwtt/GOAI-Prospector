@@ -1,4 +1,4 @@
-# GOAI 赛道三 · 材料科学文献驱动的构效关系自主发现（Pi-Agent）
+# GOAI 赛道三 · 材料科学文献驱动的构效关系自主发现（Prospector）
 
 一个面向「前沿探索 AI for Research」开放探索赛题的文献驱动科学发现智能体。
 Agent 在有限时间预算内自主完成：**文献检索 → 摘要整理 → 知识图谱撰写 → Gap 识别 → 构效关系假设 → 贝叶斯/MCTS 搜索 → 外部数据库验证 → 报告生成**，全程无需人工干预。
@@ -78,8 +78,8 @@ workspace/memory/survey/survey-reflection.md     # 运行反思（下轮改进�
 
 ```
 main.py                     # 入口：参数解析 + 预算 + 异常处理
-pi_agent/
-├── agent.py                # PiAgent 主循环（事件驱动 + 状态机 + 工具管线）
+prospector/
+├── agent.py                # Prospector 主循环（事件驱动 + 状态机 + 工具管线）
 ├── llm.py                  # LLM 调用 + 工具 schema（DeepSeek/OpenAI 兼容）
 ├── tools.py                # 22 个工具实现（含文献调研/发现类工具）
 ├── prompts.py              # 系统提示词（两阶段流程 + 预算策略）

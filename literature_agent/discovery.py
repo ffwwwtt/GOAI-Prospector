@@ -981,7 +981,7 @@ class MaterialsProjectValidator:
                 )
                 headers = {
                     "X-API-KEY": self.mp_api_key,
-                    "User-Agent": "goai-pi-agent/1.0 (literature-driven materials discovery)",
+                    "User-Agent": "goai-prospector/1.0 (literature-driven materials discovery)",
                 }
                 resp = _requests.get(url, headers=headers, timeout=15)
                 if resp.status_code != 200:

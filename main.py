@@ -1,7 +1,7 @@
 """
 GOAI 材料科学文献调研 Agent — 主入口
 =====================================
-接收命令行参数，启动 Pi-Agent 系统，在预算内自主完成文献调研。
+接收命令行参数，启动 Prospector 系统，在预算内自主完成文献调研。
 四阶段流程：检索 → 知识抽取 → Gap 分析 → 报告生成
 
 用法示例:
@@ -26,7 +26,7 @@ def run_survey(output_dir: str, budget: int = None,
         fresh_start: 是否强制忽略已有 checkpoint
         research_topic: 文献调研主题
     """
-    from pi_agent.agent import PiAgent
+    from prospector.agent import Prospector
 
     print(f"\n{'='*60}")
     print(f"  📚 Literature Survey Agent")
@@ -34,7 +34,7 @@ def run_survey(output_dir: str, budget: int = None,
     print(f"  Output: {output_dir}")
     print(f"{'='*60}")
 
-    brain = PiAgent(
+    brain = Prospector(
         output_dir=output_dir,
         budget=budget,
         fresh_start=fresh_start,

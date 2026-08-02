@@ -1,11 +1,11 @@
 """
-Pi-Agent 核心 — 自主文献调研 Agent 主循环
+Prospector 核心 — 自主文献调研 Agent 主循环
 ==========================================
 基于 ReAct 模式（Think → Act → Observe）的自动化文献调研系统。
 
 架构层次：
   Layer 1: LLMClient — DeepSeek API 调用抽象
-  Layer 2: PiAgent  — 事件驱动 + 状态机 + 工具管线 + 会话持久化 + 上下文压缩
+  Layer 2: Prospector  — 事件驱动 + 状态机 + 工具管线 + 会话持久化 + 上下文压缩
 
 Agent 在预算内自主完成四阶段流程：
   阶段1: 文献检索（多源并发搜索 + 相关性筛选）
@@ -24,21 +24,21 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from pi_agent.events import (
+from prospector.events import (
     Event, EventBus,
     EVENT_AGENT_START, EVENT_AGENT_END,
     EVENT_TURN_START, EVENT_TURN_END,
     EVENT_TOOL_START, EVENT_TOOL_END,
     make_logging_listener,
 )
-from pi_agent.llm import LLMClient
-from pi_agent.state_machine import StateMachine, AgentState
-from pi_agent.session import SessionManager
-from pi_agent.context import compress_messages
-from pi_agent.tools import build_tool_manager
+from prospector.llm import LLMClient
+from prospector.state_machine import StateMachine, AgentState
+from prospector.session import SessionManager
+from prospector.context import compress_messages
+from prospector.tools import build_tool_manager
 
 
-class PiAgent:
+class Prospector:
     """自主机器学习实验 Agent。
 
     核心设计：
@@ -216,7 +216,7 @@ class PiAgent:
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词。"""
-        from pi_agent.prompts import SURVEY_SYSTEM_PROMPT
+        from prospector.prompts import SURVEY_SYSTEM_PROMPT
         return SURVEY_SYSTEM_PROMPT
 
     # ═══════════════════════════════════════════════════════════
@@ -238,11 +238,11 @@ class PiAgent:
         self.events.emit(Event(EVENT_AGENT_START, {"task": self.task_type, "bench": self.bench}))
 
         self._print(f"\n{'='*60}")
-        self._print(f"🔬 Pi-Agent: {self.task_type}")
+        self._print(f"🔬 Prospector: {self.task_type}")
         self._print(f"{'='*60}")
         self._print(f"  Budget: {self.budget.total_budget}s | "
                     f"Model: {self.llm._active_provider.model} ({self.llm.active_provider_name})")
-        self._print(f"  Architecture: Pi-Agent (event-driven + state machine + tool pipeline)")
+        self._print(f"  Architecture: Prospector (event-driven + state machine + tool pipeline)")
         self._print(f"{'='*60}")
 
         # ── 加载 checkpoint 或全新开始 ──
@@ -601,7 +601,7 @@ class PiAgent:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({
                     "task": "survey",
-                    "agent_type": "pi-agent",
+                    "agent_type": "prospector",
                     "total_rounds": len(self._trajectory),
                     "trajectory": self._trajectory,
                 }, f, indent=2, default=str, ensure_ascii=False)

@@ -1,5 +1,5 @@
 """
-LLM 调用抽象层 — Pi-Agent Layer 1
+LLM 调用抽象层 — Prospector Layer 1
 ===================================
 提供统一的 LLM 调用接口，封装 DeepSeek API。
 

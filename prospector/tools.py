@@ -1,5 +1,5 @@
 """
-工具系统 — Pi-Agent Layer 2
+工具系统 — Prospector Layer 2
 ============================
 Agent 通过工具与外部环境交互。每个工具经过五步管线处理：
 
@@ -24,7 +24,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from pi_agent.events import Event, EventBus, EVENT_TOOL_START, EVENT_TOOL_END
+from prospector.events import Event, EventBus, EVENT_TOOL_START, EVENT_TOOL_END
 
 # ── Low-level tool implementations ──
 
@@ -79,7 +79,7 @@ class ToolManager:
             except (json.JSONDecodeError, TypeError) as e:
                 # Try JSON repair
                 raw = fn["arguments"] if isinstance(fn["arguments"], str) else ""
-                from pi_agent.llm import LLMClient
+                from prospector.llm import LLMClient
                 repaired = LLMClient.repair_json(raw)
                 if repaired != raw:
                     try:
@@ -210,7 +210,7 @@ class ToolHandlers:
     # ── list_files ──
 
     def h_list_files(self, args: dict) -> str:
-        from pi_agent._tools_impl import list_files
+        from prospector._tools_impl import list_files
         directory = args.get("directory", "workspace")
         pattern = args.get("pattern", "**/*")
         result = list_files(directory, pattern)
@@ -226,7 +226,7 @@ class ToolHandlers:
     # ── read_file ──
 
     def h_read_file(self, args: dict) -> str:
-        from pi_agent._tools_impl import read_file
+        from prospector._tools_impl import read_file
         filepath = args["filepath"]
         data_exts = (".csv", ".tsv", ".npz", ".npy", ".parquet", ".pkl", ".pickle")
         is_data_file = any(filepath.lower().endswith(ext) for ext in data_exts)
@@ -243,7 +243,7 @@ class ToolHandlers:
     # ── write_file ──
 
     def h_write_file(self, args: dict) -> str:
-        from pi_agent._tools_impl import write_file
+        from prospector._tools_impl import write_file
 
         if "_json_error" in args:
             raw = args.get('_raw_preview', '')
@@ -343,7 +343,7 @@ class ToolHandlers:
 
         # Block edits to core infrastructure
         blocked_prefixes = [
-            os.path.abspath("agent"), os.path.abspath("pi_agent"),
+            os.path.abspath("agent"), os.path.abspath("prospector"),
             os.path.abspath("main.py"), os.path.abspath("utils"),
         ]
         for blocked in blocked_prefixes:
@@ -389,7 +389,7 @@ class ToolHandlers:
     # ── run_shell ──
 
     def h_run_shell(self, args: dict) -> str:
-        from pi_agent._tools_impl import run_shell
+        from prospector._tools_impl import run_shell
         cmd = args["command"]
 
         if "MEMORY.md" in cmd and any(op in cmd for op in ("rm ", "> ", "truncate", "/dev/null")):
@@ -416,7 +416,7 @@ class ToolHandlers:
     # ── start_shell ──
 
     def h_start_shell(self, args: dict) -> str:
-        from pi_agent._tools_impl import start_shell
+        from prospector._tools_impl import start_shell
         command = args.get("command", "")
         timeout = args.get("timeout", 3600)
         result = start_shell(command, timeout=timeout)
@@ -429,7 +429,7 @@ class ToolHandlers:
     # ── check_shell ──
 
     def h_check_shell(self, args: dict) -> str:
-        from pi_agent._tools_impl import check_shell
+        from prospector._tools_impl import check_shell
         pid = args.get("pid", -1)
         result = check_shell(pid)
         if not result.get("success"):
@@ -464,7 +464,7 @@ class ToolHandlers:
     # ── kill_shell ──
 
     def h_kill_shell(self, args: dict) -> str:
-        from pi_agent._tools_impl import kill_shell
+        from prospector._tools_impl import kill_shell
         pid = args.get("pid", -1)
         result = kill_shell(pid)
         if result.get("success"):
@@ -605,7 +605,7 @@ class ToolHandlers:
         try:
             resp = _requests.get(
                 f"http://export.arxiv.org/api/query?search_query={q}&max_results=5",
-                headers={"User-Agent": "goai-pi-agent/1.0"},
+                headers={"User-Agent": "goai-prospector/1.0"},
                 timeout=30,
             )
             if resp.status_code != 200:
@@ -953,7 +953,7 @@ class ToolHandlers:
         """下载 PDF 并用 MarkItDown 解析为全文 Markdown。"""
         import requests as _requests
         resp = _requests.get(
-            url, headers={"User-Agent": "goai-pi-agent/1.0"}, timeout=60,
+            url, headers={"User-Agent": "goai-prospector/1.0"}, timeout=60,
         )
         if resp.status_code != 200 or resp.content[:4] != b"%PDF":
             return None
@@ -973,7 +973,7 @@ class ToolHandlers:
         try:
             resp = _requests.get(
                 f"http://export.arxiv.org/api/query?search_query={q}&max_results=5",
-                headers={"User-Agent": "goai-pi-agent/1.0"},
+                headers={"User-Agent": "goai-prospector/1.0"},
                 timeout=45,
             )
             if resp.status_code != 200:

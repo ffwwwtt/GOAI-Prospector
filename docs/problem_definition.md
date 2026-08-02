@@ -19,7 +19,7 @@
 
 ## 3. 系统概览
 
-Pi-Agent：一个**主题无关**的文献驱动科学发现智能体。
+Prospector：一个**主题无关**的文献驱动科学发现智能体。
 
 输入：任意材料研究主题（如 "MOF materials for CO2 capture"、"halide perovskites band gap"、"thermoelectric ZT optimization"）。
 输出（在时间预算内自主完成）：
@@ -37,7 +37,7 @@ Pi-Agent：一个**主题无关**的文献驱动科学发现智能体。
 ```
 main.py ── 入口：参数解析 + 时间预算 + 异常处理
 │
-pi_agent/        Agent 核心（ReAct 主循环、事件驱动、状态机、
+prospector/        Agent 核心（ReAct 主循环、事件驱动、状态机、
 │                 LLM 客户端、工具管线、记忆、checkpoint、上下文压缩）
 literature_agent/ 领域工具链（检索、解析、知识图谱、发现引擎）
 markitdown_utils/ 本地文档解析（PDF/DOCX/HTML）

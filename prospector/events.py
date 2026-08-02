@@ -1,5 +1,5 @@
 """
-事件驱动架构 — Pi-Agent Layer 2
+事件驱动架构 — Prospector Layer 2
 ================================
 基于发布/订阅模式的事件总线，10 种事件类型：
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Dict, List
 
-# ── Event types (mirrors Pi-Agent's 10 event types) ──
+# ── Event types (mirrors Prospector's 10 event types) ──
 EVENT_AGENT_START = "agent_start"
 EVENT_AGENT_END = "agent_end"
 EVENT_TURN_START = "turn_start"

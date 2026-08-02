@@ -1,10 +1,10 @@
-# Agent 系统说明（初赛提交物）
+# Agent 系统说明
 
----
+***
 
 ## 1. 定位
 
-Pi-Agent 是一个**主题无关**的文献驱动科学发现智能体：给定任意材料研究主题与时间预算，自主完成文献调研（基本任务）与构效关系发现（路线 A），全程无需人工干预。
+Prospector 是一个**主题无关**的文献驱动科学发现智能体：给定任意材料研究主题与时间预算，自主完成文献调研（基本任务）与构效关系发现（路线 A），全程无需人工干预。
 
 ## 2. 总体架构
 
@@ -12,7 +12,7 @@ Pi-Agent 是一个**主题无关**的文献驱动科学发现智能体：给定�
 main.py
 │  参数解析（--topic / --budget / --fresh）+ 预算 + 异常处理
 │
-pi_agent/
+prospector/
 ├── agent.py         ReAct 主循环（Think→Act→Observe）、事件驱动、状态机、checkpoint、反思触发
 ├── llm.py           LLM 客户端（DeepSeek，OpenAI 兼容）+ 24 个工具 schema + JSON 修复 + 重试
 ├── tools.py         工具管线（24 个工具实现）+ LLM×搜索融合回调 + 知识审计/覆盖审计/新颖性核查/模型对比
@@ -36,21 +36,21 @@ vendor/bash/          Git Bash（Windows 下 shell 兼容）
 
 ## 3. 核心机制
 
-| 机制 | 说明 |
-|---|---|
-| ReAct 循环 | 每轮 LLM 思考 → 执行工具 → 观察结果 → 更新记忆，直至预算耗尽或主动 stop |
-| 时间预算 | 默认 7200s；按剩余比例分级提醒；耗尽强制收尾 |
-| 事件驱动 | 10 类生命周期事件，轨迹日志全量记录（`workspace/logs/trajectory_survey.json`） |
-| 状态机 | 合法状态迁移 + 进入/退出钩子 |
-| Checkpoint | 每轮保存会话，中断续跑；干净退出自动清理 |
-| 上下文压缩 | 超阈值自动分层摘要，保持窗口内 |
-| 跨轮记忆 | MEMORY.md 索引 + 单轮总结 + 反思；续跑自动继承，不重复劳动 |
+| 机制         | 说明                                                           |
+| ---------- | ------------------------------------------------------------ |
+| ReAct 循环   | 每轮 LLM 思考 → 执行工具 → 观察结果 → 更新记忆，直至预算耗尽或主动 stop                |
+| 时间预算       | 默认 7200s；按剩余比例分级提醒；耗尽强制收尾                                    |
+| 事件驱动       | 10 类生命周期事件，轨迹日志全量记录（`workspace/logs/trajectory_survey.json`） |
+| 状态机        | 合法状态迁移 + 进入/退出钩子                                             |
+| Checkpoint | 每轮保存会话，中断续跑；干净退出自动清理                                         |
+| 上下文压缩      | 超阈值自动分层摘要，保持窗口内                                              |
+| 跨轮记忆       | MEMORY.md 索引 + 单轮总结 + 反思；续跑自动继承，不重复劳动                        |
 
 ## 4. 工具清单（24 个）
 
-- **通用（10）**：think、list_files、read_file、write_file、edit_file、run_shell、start_shell、check_shell、kill_shell、stop
-- **文献调研（8）**：search_papers、assess_search_coverage、parse_paper、get_full_text、extract_knowledge、analyze_gaps、audit_knowledge_graph、generate_report
-- **路线 A（6）**：generate_hypotheses、check_novelty、run_discovery_search、validate_discovery、run_model_comparison、generate_discovery_report
+- **通用（10）**：think、list\_files、read\_file、write\_file、edit\_file、run\_shell、start\_shell、check\_shell、kill\_shell、stop
+- **文献调研（8）**：search\_papers、assess\_search\_coverage、parse\_paper、get\_full\_text、extract\_knowledge、analyze\_gaps、audit\_knowledge\_graph、generate\_report
+- **路线 A（6）**：generate\_hypotheses、check\_novelty、run\_discovery\_search、validate\_discovery、run\_model\_comparison、generate\_discovery\_report
 
 合计：10 + 8 + 6 = 24 个。
 
@@ -67,7 +67,7 @@ vendor/bash/          Git Bash（Windows 下 shell 兼容）
 1. **假设生成**：LLM 基于 Gap 报告 + 论文摘要生成（材料/性质/预期关系/置信度/新颖性）。
 2. **新颖性核查**（`check_novelty`）：反查已检索文献库，判定 known/partial/new，输出边界说明并修正新颖性分数——不采信 LLM 自评。
 3. **搜索×LLM 融合**（`run_discovery_search`）：贝叶斯优化（k-NN 代理 + UCB 采集）与 MCTS；LLM 评估中间候选的科学合理性、引导剪枝与聚焦，评估次数落盘可审计。
-4. **双轨验证**（`validate_discovery`）：无机材料走 Materials Project / NOMAD / OQMD 数据库；有机/框架材料走文献证据链（≥2 篇独立论文 → literature_supported）；数据库无记录时输出覆盖性说明。
+4. **双轨验证**（`validate_discovery`）：无机材料走 Materials Project / NOMAD / OQMD 数据库；有机/框架材料走文献证据链（≥2 篇独立论文 → literature\_supported）；数据库无记录时输出覆盖性说明。
 5. **统计对比**（`run_model_comparison`）：抽取定量样本，拟合基线（均值/线性）与候选（二次/多特征）模型，输出 R²/RMSE 对比 + LLM 科学解释（含前人公式为何失效）。
 6. **发现报告**：假设清单 + 证据链 + 验证状态 + 科学解释 + 负结果如实记录。
 
@@ -80,12 +80,12 @@ vendor/bash/          Git Bash（Windows 下 shell 兼容）
 
 ## 8. 增量说明
 
-| 版本 | 关键增量 |
-|---|---|
-| v1（初始提交） | 完整四层架构、基本任务全流程、预算/记忆/checkpoint |
-| v2 | NOMAD 验证接入 + MP 查询修复（_fields、requests）；知识图谱审计、双轨验证、全文深度阅读、检索覆盖审计 |
-| v3 | 文献匹配元素/家族签名宽松化；get_full_text arXiv 标题回退 |
-| v4 | 验证统一走工具（批量 all）；LLM×搜索融合（中间评估/剪枝）；新颖性核查；模型统计对比；性质映射通用化 |
+| 版本       | 关键增量                                                              |
+| -------- | ----------------------------------------------------------------- |
+| v1（初始提交） | 完整四层架构、基本任务全流程、预算/记忆/checkpoint                                   |
+| v2       | NOMAD 验证接入 + MP 查询修复（\_fields、requests）；知识图谱审计、双轨验证、全文深度阅读、检索覆盖审计 |
+| v3       | 文献匹配元素/家族签名宽松化；get\_full\_text arXiv 标题回退                         |
+| v4       | 验证统一走工具（批量 all）；LLM×搜索融合（中间评估/剪枝）；新颖性核查；模型统计对比；性质映射通用化            |
 
 ## 9. 复现与环境
 
@@ -93,3 +93,4 @@ vendor/bash/          Git Bash（Windows 下 shell 兼容）
 - 密钥：`.api_key`（`DEEPSEEK_API_KEY` 必需；`SCIVERSE_API_KEY`、`MATERIALS_PROJECT_API_KEY`、`MINERU_API_KEY` 可选）。
 - 运行：`python main.py --topic "<主题>" --budget 1800`。
 - 输出：`workspace/outputs/literature_survey/`（五件套 + 发现），轨迹与缓存见 `workspace/logs/`、`workspace/data/`。
+
