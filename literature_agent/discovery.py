@@ -104,6 +104,7 @@ class DiscoveryReport:
     total_candidates: int = 0
     total_explored: int = 0
     validated_count: int = 0
+    literature_supported_count: int = 0
     refuted_count: int = 0
     search_summary: str = ""
     materials_project_hits: int = 0
@@ -119,6 +120,7 @@ class DiscoveryReport:
             "total_candidates": self.total_candidates,
             "total_explored": self.total_explored,
             "validated_count": self.validated_count,
+            "literature_supported_count": self.literature_supported_count,
             "refuted_count": self.refuted_count,
             "search_summary": self.search_summary,
             "materials_project_hits": self.materials_project_hits,
@@ -140,11 +142,16 @@ class DiscoveryReport:
         return str(md_path), str(json_path)
 
     def to_markdown(self) -> str:
+        from collections import Counter
+        status_counts = Counter(h.validation_status for h in self.hypotheses)
         lines = [
             f"# {self.title}",
             f"\n**Generated:** {self.generated_at}",
             f"**Total candidates explored:** {self.total_explored}",
             f"**Validated:** {self.validated_count} | **Refuted:** {self.refuted_count}",
+            f"**Literature supported:** {self.literature_supported_count} | "
+            f"**Inconclusive:** {status_counts.get('inconclusive', 0)} | "
+            f"**Pending:** {status_counts.get('pending', 0)}",
             f"**Materials Project hits:** {self.materials_project_hits}",
             f"\n## Search Summary\n\n{self.search_summary}\n",
             "---\n",
@@ -152,11 +159,21 @@ class DiscoveryReport:
         ]
 
         for i, h in enumerate(self.sorted_by_novelty()):
-            status = {"validated": "✅", "refuted": "❌", "pending": "⏳", "inconclusive": "❓"}.get(
-                h.validation_status, "⏳"
-            )
+            status = {
+                "validated": "✅", "literature_supported": "📚",
+                "refuted": "❌", "pending": "⏳", "inconclusive": "❓",
+            }.get(h.validation_status, "⏳")
+            novelty_tag = ""
+            ncheck = h.novelty_check or {}
+            nstatus = ncheck.get("status", "")
+            if nstatus == "known":
+                novelty_tag = "｜新知/已知：🔁 已有文献报道"
+            elif nstatus == "partial":
+                novelty_tag = "｜新知/已知：🟡 部分已知"
+            elif nstatus == "new":
+                novelty_tag = "｜新知/已知：🆕 全新"
             lines.extend([
-                f"### {i+1}. {status} {h.title}",
+                f"### {i+1}. {status} {h.title}{novelty_tag}",
                 f"",
                 f"**Confidence:** {h.confidence:.2f} | **Novelty:** {h.novelty_score:.2f} | "
                 f"**LLM Plausibility:** {h.llm_plausibility_score:.2f}",
@@ -619,7 +636,11 @@ class MaterialsProjectValidator:
         ],
         "selectivity": ["selectivity", "separation factor", "选择性", "分离因子", "分离选择性"],
         "heat": ["isosteric heat", "qst", "enthalpy", "吸附热", "等量吸附热", "吸附焓", "焓"],
-        "stability": ["stability", "cyclability", "循环稳定性", "稳定性", "水稳定性", "湿稳定性", "循环"],
+        "stability": [
+            "stability", "cyclability", "循环稳定性", "稳定性", "水稳定性",
+            "湿稳定性", "循环", "保持率", "容量保持", "retention",
+            "capacity retention",
+        ],
         "efficiency": ["efficiency", "pce", "效率", "再生能耗", "能耗"],
         "surface area": ["surface area", "bet", "比表面积", "表面积"],
         "conductivity": ["conductivity", "电导率"],
@@ -1356,6 +1377,28 @@ def extract_samples_for_hypothesis(
         if not any(kw in block_lower for kw in kws):
             continue
         lines = block.splitlines()
+
+        # 表头列检测：找含性质关键词的表头单元格（排除论文/来源/效果等非数值列）
+        prop_col = None
+        best_kw_len = -1
+        _generic_header_markers = ("论文", "来源", "实体", "效果", "备注", "id", "类型", "条件", "方法", "序号")
+        for line in lines:
+            hs = line.strip()
+            if not hs.startswith("|"):
+                continue
+            hc = [c.strip().lower() for c in hs.split("|")]
+            if any(re.search(r"\d", c) for c in hc):
+                continue  # 含数字 → 数据行，不是表头
+            for ci, cell in enumerate(hc):
+                if any(g in cell for g in _generic_header_markers):
+                    continue
+                for kw in kws:
+                    if kw in cell and len(kw) > best_kw_len:
+                        best_kw_len = len(kw)
+                        prop_col = ci
+        if best_kw_len < 2:
+            prop_col = None
+
         heading_mats: List[str] = []
         heading_text = ""
         for line in lines:
@@ -1394,13 +1437,30 @@ def extract_samples_for_hypothesis(
             # 表格行按单元格解析：| 材料 | 性质值 | 条件... | 来源 |
             cells = [c.strip() for c in s.split("|")] if "|" in s else []
             if len(cells) >= 3:
-                prop_cell = cells[2]
+                if prop_col is not None and prop_col < len(cells):
+                    prop_cell = cells[prop_col]
+                else:
+                    # 无表头指引 → 按性质单位猜列（排除过于通用的 %）
+                    _guess_units = {
+                        u for u in _PROPERTY_VALUE_UNITS if u not in ("%", "mev")
+                    }
+                    guessed = None
+                    for cell in cells[1:]:
+                        if any(u in cell.lower() for u in _guess_units):
+                            guessed = cell
+                            break
+                    if guessed is None:
+                        continue  # 既无表头也无单位 → 不猜
+                    prop_cell = guessed
                 cell_pairs = [
                     (abs(float(vm.group(1))), (vm.group(2) or "").lower())
                     for vm in _SAMPLE_UNIT_RE.finditer(prop_cell.lower())
                     if 0 < abs(float(vm.group(1))) < 1e7
                 ]
-                bare = re.findall(r'\d+(?:\.\d+)?', prop_cell)
+                bare = re.findall(
+                    r'\d+(?:\.\d+)?',
+                    re.sub(r'\bp\d+\b', ' ', prop_cell),
+                )
                 if cell_pairs:
                     y, y_unit = cell_pairs[0]
                 elif bare:
@@ -1417,27 +1477,26 @@ def extract_samples_for_hypothesis(
                     desc.setdefault(u, v)
             else:
                 # 非表格行
+                if not any(kw in bl for kw in kws):
+                    continue  # 叙述行必须行内含性质关键词
                 pairs = [
                     (abs(float(vm.group(1))), (vm.group(2) or "").lower())
                     for vm in _SAMPLE_UNIT_RE.finditer(bl)
                     if 0 < abs(float(vm.group(1))) < 1e7
                 ]
                 if not pairs:
-                    bare = re.findall(r'\d+(?:\.\d+)?', bl)
-                    if not bare:
-                        continue
-                    y, y_unit = abs(float(bare[0])), ""
-                    desc = {}
+                    continue  # 叙述行不做裸数兜底（避免 p-ID/材料名数字污染）
                 else:
-                    y, y_unit = None, ""
+                    prop_pairs = [
+                        (v, u) for v, u in pairs if u in _PROPERTY_VALUE_UNITS
+                    ]
+                    if not prop_pairs:
+                        continue  # 只有描述符单位（V/K/bar 等）→ 非性质值行
+                    y, y_unit = prop_pairs[0]
                     desc = {}
                     for v, u in pairs:
-                        if y is None and u in _PROPERTY_VALUE_UNITS:
-                            y, y_unit = v, u
-                        else:
+                        if (v, u) != (y, y_unit):
                             desc.setdefault(u, v)
-                    if y is None:
-                        y, y_unit = pairs[0]
             key = (line_mats[0], round(y, 4))
             if key in seen:
                 continue
@@ -1496,7 +1555,10 @@ def compare_models(samples: List[Dict], descriptor_names: List[str]) -> Dict[str
         # 基线：最优单描述符线性
         best = None
         for dname, vals, mask in usable:
-            slope, intercept = _np.polyfit(vals[mask], ys[mask], 1)
+            import warnings as _warnings
+            with _warnings.catch_warnings():
+                _warnings.simplefilter("ignore")
+                slope, intercept = _np.polyfit(vals[mask], ys[mask], 1)
             pred = slope * vals[mask] + intercept
             r2 = _r2_score(ys[mask], pred)
             if best is None or r2 > best[0]:

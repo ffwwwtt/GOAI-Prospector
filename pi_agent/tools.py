@@ -1570,8 +1570,25 @@ class ToolHandlers:
             lines.append(f"   💡 {explanation[:200]}...")
         return "\n".join(lines)
 
+    def _llm_hypothesis_explanation(self, hyp) -> str:
+        """为单条假设生成 LLM 科学解释（返回 explanation；失败返回空串）。"""
+        import json as _json
+        try:
+            prompt = (
+                "你是材料科学研究者。为下面这条构效关系假设写 3-5 句中文科学解释："
+                "（1）机制上为什么这个关系可能成立；（2）与已有文献结论的关系"
+                "（新知还是已知）；（3）可能的失效边界。不要编造数值。\n\n"
+                f"标题：{hyp.title}\n材料：{hyp.materials[:5]}\n"
+                f"性质：{hyp.property}\n预期关系：{hyp.expected_relationship}\n"
+                f"证据链：{hyp.evidence_chain[:10]}\n\n"
+                "只输出解释文本。"
+            )
+            return self._llm_text(prompt, max_tokens=600)
+        except Exception:
+            return ""
+
     def h_generate_discovery_report(self, args: dict) -> str:
-        """生成路线 A 发现报告。"""
+        """生成路线 A 发现报告（自动补齐缺失的 LLM 科学解释与统计口径）。"""
         from literature_agent.discovery import DiscoveryReport, DiscoveryHypothesis
         from pathlib import Path as _Path
         import json as _json
@@ -1587,16 +1604,44 @@ class ToolHandlers:
 
         hypotheses = [self._safe_hypothesis(h) for h in hypotheses_data]
 
+        # 自动补齐缺失的 LLM 科学解释（拒绝黑箱：每条假设必须有可读解释）
+        explained = 0
+        for h in hypotheses:
+            if not h.llm_explanation:
+                explanation = self._llm_hypothesis_explanation(h)
+                if explanation:
+                    h.llm_explanation = explanation
+                    # 合理性评分：以置信度为基础，若验证通过则略上调
+                    h.llm_plausibility_score = min(
+                        1.0, h.confidence + (0.1 if h.validation_status in (
+                            "validated", "literature_supported") else 0.0)
+                    )
+                    explained += 1
+
+        def _is_db_validated(h) -> bool:
+            ev = h.external_validation or {}
+            return (
+                ev.get("validation_source") == "database"
+                and isinstance(ev.get("details"), dict)
+                and "materials_project" in ev["details"]
+            )
+
         report = DiscoveryReport(
             title=f"Structure-Property Relationship Discovery",
             hypotheses=hypotheses,
             total_candidates=len(hypotheses),
             total_explored=sum(h.candidates_explored for h in hypotheses),
             validated_count=sum(1 for h in hypotheses if h.validation_status == "validated"),
+            literature_supported_count=sum(
+                1 for h in hypotheses if h.validation_status == "literature_supported"
+            ),
             refuted_count=sum(1 for h in hypotheses if h.validation_status == "refuted"),
-            materials_project_hits=sum(1 for h in hypotheses
-                                      if h.external_validation.get("overall_match")),
-            search_summary=f"Explored {len(hypotheses)} hypotheses via Bayesian optimization and MCTS.",
+            materials_project_hits=sum(1 for h in hypotheses if _is_db_validated(h)),
+            search_summary=(
+                f"Explored {len(hypotheses)} hypotheses via Bayesian optimization and MCTS; "
+                f"literature-supported "
+                f"{sum(1 for h in hypotheses if h.validation_status == 'literature_supported')}."
+            ),
         )
 
         out_dir = _Path("workspace/outputs/literature_survey/discovery")
@@ -1610,8 +1655,10 @@ class ToolHandlers:
             f"   Markdown: {md_path}\n"
             f"   JSON:     {json_path}\n"
             f"   Hypotheses: {len(hypotheses)}\n"
-            f"   Validated: {report.validated_count} | Refuted: {report.refuted_count}\n"
+            f"   Validated: {report.validated_count} | Literature supported: "
+            f"{report.literature_supported_count} | Refuted: {report.refuted_count}\n"
             f"   Materials Project hits: {report.materials_project_hits}"
+            + (f"\n   LLM 科学解释已补齐：{explained} 条" if explained else "")
         )
 
     # ── Literature Survey Tools ──
