@@ -11,6 +11,7 @@ workspace/outputs/
 workspace/memory/
 workspace/feedback/
 workspace/code/
+workspace/docx_build/
 
 # IDE / misc
 .claude/
@@ -19,6 +20,11 @@ workspace/code/
 *.zip
 补充.md
 初赛材料不足分析.md
+
+# 官方模板与个人简历（仅本地参考，不上传）
+AI for reserach算法赛初赛模板.docx
+队长个人简历.pdf
+队员个人简历.pdf
 
 # Vendor binaries
 vendor/
